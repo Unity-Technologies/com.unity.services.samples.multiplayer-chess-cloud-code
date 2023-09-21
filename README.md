@@ -1,6 +1,6 @@
 # Multiplayer Chess Sample
 
-A sample project that demonstrates how to implement a server authoritative multiplayer game using [Unity Gaming Services](https://unity.com/solutions/gaming-services).
+A sample project that demonstrates how to implement a server authoritative asynchronous multiplayer game using [Unity Gaming Services](https://unity.com/solutions/gaming-services), without needing a dedicated game server.
 
 ## Setup
 
