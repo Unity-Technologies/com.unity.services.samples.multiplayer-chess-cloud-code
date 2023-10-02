@@ -48,3 +48,5 @@ To limit access to specific Cloud Code endpoints from authenticated players (i.e
 ## Credits
 
 This project uses the [Free Low Poly Chess Set](https://assetstore.unity.com/packages/3d/props/free-low-poly-chess-set-116856) asset for the board and chess pieces, and the [Gera Chess Library](https://github.com/Geras1mleo/Chess) for validating the moves made by players.
+
+See [Third Party Notices](Third%20Party%20Notices.md) for more information.
