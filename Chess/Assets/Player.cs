@@ -172,7 +172,7 @@ public class Player : MonoBehaviour
                 case "boardUpdated":
                 {
                     var message = JsonConvert.DeserializeObject<Dictionary<string, string>>(@event.Message);
-                    SyncBoard(FenToDict(message["board"]));
+                    SyncBoard(FenToDict(message["Board"]));
                     break;
                 }
                 case "clearBoard":

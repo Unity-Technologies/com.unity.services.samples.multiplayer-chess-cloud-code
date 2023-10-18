@@ -748,10 +748,10 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
-  cloudProjectId: 42a3e924-4bd9-41f8-adc9-59b18a032599
+  cloudProjectId: aa783631-e8b8-46c6-9741-09566c8e26c2
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Innerspace Test Project
+  projectName: Souped Up Chess
   organizationId: live-ops-org
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
