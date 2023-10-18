@@ -12,6 +12,7 @@ public class Chess
 {
     private const string LeaderboardId = "EloRatings";
     private const int KValue = 30;
+    private const int StartingElo = 1500;
     private readonly IGameApiClient _gameApiClient;
     private readonly IPushClient _pushClient;
     private readonly ILogger<Chess> _logger;
@@ -105,22 +106,32 @@ public class Chess
                 session,
                 new SetItemBody("board", chessBoard.ToFen()));
 
-
-            
             // Send the updated board state to the other player
             var otherPlayer = lobbyResponse.Data.Players.Find(p => p.Id != context.PlayerId);
             if (otherPlayer == null) return new Dictionary<string, string> { { "board", chessBoard.ToFen() } };
-            var message = new BoardUpdatedMessage {Session = session, Board = chessBoard.ToFen()};
+            var message = new BoardUpdatedMessage
+            {
+                Session = session, 
+                Board = chessBoard.ToFen(), 
+                GameOver = chessBoard.IsEndGame, 
+                EndgameType = chessBoard.EndGame?.EndgameType.ToString()
+            };
             await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(message), message.Type,
                 otherPlayer!.Id);
                 
             if (chessBoard.IsEndGame)
             {
+                var playerScore = activePlayerColour == chessBoard.EndGame.WonSide ? 1 :
+                    chessBoard.EndGame.WonSide == null ? 0.5 : 0;
                 await UpdateElos(
                     context,
-                    activePlayerColour == 1 ? player.Id : otherPlayer.Id,
-                    activePlayerColour == 1 ? otherPlayer.Id : player.Id,
-                    chessBoard.EndGame.WonSide);
+                    otherPlayer.Id,
+                    playerScore);
+                return new Dictionary<string, string>
+                {
+                    { "board", chessBoard.ToFen() },
+                    { "result", chessBoard.EndGame.EndgameType.ToString()}
+                };
             }
             return new Dictionary<string, string> { { "board", chessBoard.ToFen() } };
         }
@@ -133,24 +144,27 @@ public class Chess
         }
     }
 
-    public async Task UpdateElos(IExecutionContext context, string whitePlayerId, string blackPlayerId, PieceColor? winningSide)
+    public async Task UpdateElos(IExecutionContext context, string opponentId, double playerScore)
     {
         var projectId = Guid.Parse(context.ProjectId);
         var elos = await _gameApiClient.Leaderboards.GetLeaderboardScoresByPlayerIdsAsync(context, context.ServiceToken,
             projectId, LeaderboardId,
-            new LeaderboardPlayerIds(new List<string>() {whitePlayerId, blackPlayerId}));
-        var whiteElo = elos.Data.Results.FirstOrDefault(r => r.PlayerId == whitePlayerId)?.Score ?? 1500;
-        var blackElo = elos.Data.Results.FirstOrDefault(r => r.PlayerId == blackPlayerId)?.Score ?? 1500;
-        var whiteExpectedScore = 1 / (1 + Math.Pow(10, (blackElo - whiteElo) / 400));
-        var whiteScore = winningSide == PieceColor.White ? 1 : winningSide == PieceColor.Black ? 0 : 0.5;
-        var whiteNewElo = whiteElo + KValue * (whiteScore - whiteExpectedScore);
-        var blackNewElo = blackElo + KValue * (1 - whiteScore - (1 - whiteExpectedScore));
+            new LeaderboardPlayerIds(new List<string>() {context.PlayerId, opponentId}));
+        var playerElo = elos.Data?.Results?.Find(r => r.PlayerId == context.PlayerId)?.Score ?? StartingElo;
+        var opponentElo = elos.Data?.Results?.Find(r => r.PlayerId == opponentId)?.Score ?? StartingElo;
+        
+        var expectedScore = 1 / (1 + Math.Pow(10, (opponentElo - playerElo) / 400));
+        var eloChange = KValue * (playerScore - expectedScore);
+        var playerNewElo = playerElo + eloChange;
+        var opponentNewElo = opponentElo - eloChange;
+        _logger.LogInformation($"Updating {context.PlayerId}'s Elo from {playerElo} to {playerNewElo}");
+        _logger.LogInformation($"Updating {opponentId}'s Elo from {opponentElo} to {opponentNewElo}");
         var tasks = new Task[]
         {
             _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId, LeaderboardId,
-                whitePlayerId, new LeaderboardScore(whiteNewElo)),
+                context.PlayerId, new LeaderboardScore(playerNewElo)),
             _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId, LeaderboardId,
-                blackPlayerId, new LeaderboardScore(blackNewElo))
+                opponentId, new LeaderboardScore(opponentNewElo))
         };
         await Task.WhenAll(tasks);
     }
@@ -185,6 +199,8 @@ public class Chess
         public string Session { get; set; }
         public string Board { get; set; }
         public string Type = "boardUpdated";
+        public bool GameOver { get; set; }
+        public string EndgameType { get; set; }
     }
 
     private class ClearBoardMessage

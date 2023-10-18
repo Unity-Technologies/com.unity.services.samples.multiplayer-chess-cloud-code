@@ -8,11 +8,13 @@ using Unity.Services.Authentication;
 using Unity.Services.CloudCode;
 using Unity.Services.CloudCode.Subscriptions;
 using Unity.Services.Core;
+using Unity.Services.Leaderboards;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SocialPlatforms.Impl;
 using WebSocketSharp;
 
 public class Player : MonoBehaviour
@@ -22,7 +24,9 @@ public class Player : MonoBehaviour
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
     public TextMeshProUGUI playerNameText;
+    public TextMeshProUGUI playerEloText;
     public GameObject uiPanel;
+    public TextMeshProUGUI resultText;
     public GameObject board;
     
     private readonly Dictionary<string, UnityEngine.Object> _prefabs = new();
@@ -41,6 +45,13 @@ public class Player : MonoBehaviour
         playerNameText.text = AuthenticationService.Instance.PlayerId;
         await SubscribeToPlayerMessages();
         SyncBoard(FenToDict(StartingBoard));
+        UpdatePlayerElo();
+    }
+
+    public async Task UpdatePlayerElo()
+    {
+        var response = await LeaderboardsService.Instance.GetPlayerScoreAsync("EloRatings");
+        playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
     }
 
     public async void CreateGame()
@@ -155,6 +166,12 @@ public class Player : MonoBehaviour
             SelectPiece(null);
             var response = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
             SyncBoard(FenToDict(response["board"]));
+            if (response.ContainsKey("result"))
+            {
+                uiPanel.SetActive(true);
+                resultText.text = response["result"];
+                UpdatePlayerElo();
+            }
         }
         catch (CloudCodeException exception)
         {
@@ -171,8 +188,14 @@ public class Player : MonoBehaviour
             {
                 case "boardUpdated":
                 {
-                    var message = JsonConvert.DeserializeObject<Dictionary<string, string>>(@event.Message);
-                    SyncBoard(FenToDict(message["Board"]));
+                    var message = JsonConvert.DeserializeObject<BoardUpdatedMessage>(@event.Message);
+                    SyncBoard(FenToDict(message.Board));
+                    if (message.GameOver)
+                    {
+                        uiPanel.SetActive(true);
+                        resultText.text = message.EndgameType;
+                        UpdatePlayerElo();
+                    }
                     break;
                 }
                 case "clearBoard":
@@ -283,7 +306,17 @@ public class Player : MonoBehaviour
     {
         public string Board { get; set; }
         public string Error { get; set; }
+    }    
+    
+    private class BoardUpdatedMessage
+    {
+        public string Session { get; set; }
+        public string Board { get; set; }
+        public string Type = "boardUpdated";
+        public bool GameOver { get; set; }
+        public string EndgameType { get; set; }
     }
+
 
     private string PosToFen(Vector3 pos)
     {

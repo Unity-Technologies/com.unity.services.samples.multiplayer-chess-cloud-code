@@ -119,6 +119,16 @@
       },
       "url": "https://packages.unity.com"
     },
+    "com.unity.services.leaderboards": {
+      "version": "1.0.0",
+      "depth": 0,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.services.authentication": "2.5.0",
+        "com.unity.services.core": "1.9.0"
+      },
+      "url": "https://packages.unity.com"
+    },
     "com.unity.services.lobby": {
       "version": "1.0.3",
       "depth": 0,
