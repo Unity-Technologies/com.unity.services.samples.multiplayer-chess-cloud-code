@@ -21,6 +21,7 @@ public class Player : MonoBehaviour
 {
     private GameObject _selectedPiece;
     public Camera playerCamera;
+    public GameObject cameraPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
     public TextMeshProUGUI playerNameText;
@@ -74,8 +75,18 @@ public class Player : MonoBehaviour
                 })
         };
         _isWhite = true;
+        SetCameraAngle();
         _currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyCodeText.text, maxPlayers, options);
         JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+    }
+
+    public void SetCameraAngle()
+    {
+        var angle = _isWhite ? 70 : 250;
+        Debug.Log($"Setting camera angle to {angle}");
+        var currentRotation = cameraPivot.transform.rotation.eulerAngles;
+        Debug.Log(currentRotation);
+        cameraPivot.transform.rotation = Quaternion.Euler(currentRotation.x, angle, currentRotation.z);
     }
 
     public async void JoinLobbyByCode()
@@ -88,6 +99,7 @@ public class Player : MonoBehaviour
             lobbyCodeText.text = _currentLobby.LobbyCode;
             JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
             _isWhite = false;
+            SetCameraAngle();
         }
         catch (LobbyServiceException exception)
         {
