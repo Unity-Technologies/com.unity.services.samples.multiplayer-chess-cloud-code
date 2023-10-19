@@ -33,6 +33,7 @@ public class Player : MonoBehaviour
     private Lobby _currentLobby;
     private const string StartingBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     private bool _gameStarted;
+    private bool _isWhite;
 
     private readonly Color32 _selectedColor = new (84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
@@ -72,6 +73,7 @@ public class Player : MonoBehaviour
                     }
                 })
         };
+        _isWhite = true;
         _currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyCodeText.text, maxPlayers, options);
         JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
     }
@@ -85,6 +87,7 @@ public class Player : MonoBehaviour
             _currentLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(sanitizedLobbyCode);
             lobbyCodeText.text = _currentLobby.LobbyCode;
             JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+            _isWhite = false;
         }
         catch (LobbyServiceException exception)
         {
@@ -235,12 +238,18 @@ public class Player : MonoBehaviour
         if (Physics.Raycast(rayOrigin, out var hitInfo))
         {
             // TODO: check if a piece is selected and another piece is clicked - is that a move?
+            var gameObject = hitInfo.transform.gameObject;
             if (hitInfo.transform.gameObject.name == "Board")
             {
                 var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
                 MakeMove(_selectedPiece, boardPos);
             }
-            else
+            else if (_selectedPiece != null && gameObject.name.Contains("Light") != _isWhite)
+            {
+                var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
+                MakeMove(_selectedPiece, boardPos);
+            }
+            else if (gameObject.name.Contains("Light") == _isWhite)
             {
                 SelectPiece(hitInfo.transform.gameObject);
                 Debug.Log($"Piece selected: {_selectedPiece.name}");    
