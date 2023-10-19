@@ -239,12 +239,7 @@ public class Player : MonoBehaviour
         {
             // TODO: check if a piece is selected and another piece is clicked - is that a move?
             var gameObject = hitInfo.transform.gameObject;
-            if (hitInfo.transform.gameObject.name == "Board")
-            {
-                var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
-                MakeMove(_selectedPiece, boardPos);
-            }
-            else if (_selectedPiece != null && gameObject.name.Contains("Light") != _isWhite)
+            if (hitInfo.transform.gameObject.name == "Board" || _selectedPiece != null && gameObject.name.Contains("Light") != _isWhite)
             {
                 var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
                 MakeMove(_selectedPiece, boardPos);
