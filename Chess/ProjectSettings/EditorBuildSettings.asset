@@ -8,5 +8,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/ChessDemo.unity
     guid: e28af01b48e63f44c9698f9b28e48f11
+  - enabled: 1
+    path: Assets/Scenes/ChessClub.unity
+    guid: 43e6ed2a54c48964e803be5dc60978c5
   m_configObjects:
     com.unity.input.settings: {fileID: 11400000, guid: ce1c19ef905904731bed829dbeee464d, type: 2}

@@ -13,6 +13,7 @@ using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 using WebSocketSharp;
 
 public class Player : MonoBehaviour
@@ -37,9 +38,13 @@ public class Player : MonoBehaviour
     private async void Start()
     {
         await UnityServices.InitializeAsync();
-        await AuthenticationService.Instance.SignInAnonymouslyAsync();
+        if (!AuthenticationService.Instance.IsSignedIn)
+        {
+            await AuthenticationService.Instance.SignInAnonymouslyAsync();
+            await SubscribeToPlayerMessages();
+        }
+
         playerNameText.text = AuthenticationService.Instance.PlayerId;
-        await SubscribeToPlayerMessages();
         SyncBoard(FenToDict(StartingBoard));
     }
 
@@ -91,7 +96,8 @@ public class Player : MonoBehaviour
             if (!joinGameResponse.Board.IsNullOrEmpty())
             {
                 SyncBoard(FenToDict(joinGameResponse.Board));
-                uiPanel.SetActive(false);    
+                uiPanel.SetActive(false);
+                Debug.Log(lobbyCode);
             }
             else
             {
@@ -288,5 +294,10 @@ public class Player : MonoBehaviour
     private string PosToFen(Vector3 pos)
     {
         return (char)(pos.x + 97) + ((char)pos.z + 1).ToString();
+    }
+    
+    public void SwitchToClubsScene()
+    {
+        SceneManager.LoadScene("ChessClub", LoadSceneMode.Single);
     }
 }
