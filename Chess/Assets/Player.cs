@@ -237,9 +237,9 @@ public class Player : MonoBehaviour
         var rayOrigin = playerCamera.ScreenPointToRay(mousePosition);
         if (Physics.Raycast(rayOrigin, out var hitInfo))
         {
-            // TODO: check if a piece is selected and another piece is clicked - is that a move?
             var gameObject = hitInfo.transform.gameObject;
-            if (hitInfo.transform.gameObject.name == "Board" || _selectedPiece != null && gameObject.name.Contains("Light") != _isWhite)
+            if (hitInfo.transform.gameObject.name == "Board"
+                || (_selectedPiece != null && gameObject.name.Contains("Light") != _isWhite))
             {
                 var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
                 MakeMove(_selectedPiece, boardPos);
