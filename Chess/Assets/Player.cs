@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -14,6 +15,7 @@ using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 using UnityEngine.SocialPlatforms.Impl;
 using WebSocketSharp;
 
@@ -21,7 +23,7 @@ public class Player : MonoBehaviour
 {
     private GameObject _selectedPiece;
     public Camera playerCamera;
-    public GameObject cameraPivot;
+    public GameObject boardPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
     public TextMeshProUGUI playerNameText;
@@ -47,10 +49,10 @@ public class Player : MonoBehaviour
         playerNameText.text = AuthenticationService.Instance.PlayerId;
         await SubscribeToPlayerMessages();
         SyncBoard(FenToDict(StartingBoard));
-        UpdatePlayerElo();
+        RefreshPlayerElo();
     }
 
-    public async Task UpdatePlayerElo()
+    private async Task RefreshPlayerElo()
     {
         var response = await LeaderboardsService.Instance.GetPlayerScoreAsync("EloRatings");
         playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
@@ -75,18 +77,16 @@ public class Player : MonoBehaviour
                 })
         };
         _isWhite = true;
-        SetCameraAngle();
+        SetPov();
         _currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyCodeText.text, maxPlayers, options);
         JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
     }
 
-    public void SetCameraAngle()
+    private void SetPov()
     {
-        var angle = _isWhite ? 70 : 250;
-        Debug.Log($"Setting camera angle to {angle}");
-        var currentRotation = cameraPivot.transform.rotation.eulerAngles;
-        Debug.Log(currentRotation);
-        cameraPivot.transform.rotation = Quaternion.Euler(currentRotation.x, angle, currentRotation.z);
+        var angle = _isWhite ? 0 : 180;
+        var currentRotation = boardPivot.transform.rotation.eulerAngles;
+        boardPivot.transform.rotation = Quaternion.Euler(currentRotation.x, angle, currentRotation.z);
     }
 
     public async void JoinLobbyByCode()
@@ -99,7 +99,7 @@ public class Player : MonoBehaviour
             lobbyCodeText.text = _currentLobby.LobbyCode;
             JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
             _isWhite = false;
-            SetCameraAngle();
+            SetPov();
         }
         catch (LobbyServiceException exception)
         {
@@ -141,7 +141,6 @@ public class Player : MonoBehaviour
             }
             foreach (var piece in boardState)
             {
-                
                 var pieceType = char.ToLower(piece.Value) switch
                 {
                     'p' => "Pawn",
@@ -153,7 +152,7 @@ public class Player : MonoBehaviour
                     _ => ""
                 };
                 var prefabName = pieceType + (char.IsUpper(piece.Value) ? "Light" : "Dark");
-                if (!_prefabs.TryGetValue(prefabName, out var prefab))
+                if (!_prefabs.ContainsKey(prefabName))
                 {
                     _prefabs[prefabName] = Resources.Load($"{pieceType}/Prefabs/{prefabName}");    
                 }
@@ -185,7 +184,7 @@ public class Player : MonoBehaviour
             {
                 uiPanel.SetActive(true);
                 resultText.text = response["result"];
-                UpdatePlayerElo();
+                RefreshPlayerElo();
             }
         }
         catch (CloudCodeException exception)
@@ -209,7 +208,7 @@ public class Player : MonoBehaviour
                     {
                         uiPanel.SetActive(true);
                         resultText.text = message.EndgameType;
-                        UpdatePlayerElo();
+                        RefreshPlayerElo();
                     }
                     break;
                 }
