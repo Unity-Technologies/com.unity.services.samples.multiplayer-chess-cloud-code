@@ -51,16 +51,31 @@ public class Chess
     [CloudCodeFunction("JoinGame")]
     public async Task<JoinGameResponse> JoinGame(IExecutionContext context, string lobbyCode)
     {
-        var joinLobbyResponse = await _gameApiClient.Lobby.JoinLobbyByCodeAsync(context, context.AccessToken,
-            joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId)));
+        try
+        {
+            var joinLobbyResponse = await _gameApiClient.Lobby.JoinLobbyByCodeAsync(context, context.AccessToken,
+                joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId)));
+            return await CreateNewGame(context, joinLobbyResponse.Data);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError($"{e.Message} | {e.GetType().Name}");
+            var lobbyIds = _gameApiClient.Lobby.GetJoinedLobbiesAsync(context, context.AccessToken);
+            var lobbyResponse = await _gameApiClient.Lobby.GetLobbyAsync(context, context.AccessToken, lobbyIds.Result.Data.First());
+            return await Rejoin(context, lobbyResponse.Data);
+        }
+    }
 
-        var isWhite = _rng.Next(0, 2) == 0;        
-        var opponentId = joinLobbyResponse.Data.Players.Select(p => p.Id).First(id => id != context.PlayerId);
+    private async Task<JoinGameResponse> CreateNewGame(IExecutionContext context, Lobby lobby)
+    {
+        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);
+        var isWhite = _rng.Next(0, 2) == 0;
 
         var chessBoard = new ChessBoard();
         await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
-            joinLobbyResponse.Data.Id,
-            new SetItemBatchBody(new List<SetItemBody>(){ 
+            lobby.Id,
+            new SetItemBatchBody(new List<SetItemBody>()
+            {
                 new("board", chessBoard.ToFen()),
                 new("whitePlayerId", isWhite ? context.PlayerId : opponentId),
                 new("blackPlayerId", isWhite ? opponentId : context.PlayerId)
@@ -68,23 +83,44 @@ public class Chess
 
         var message = new JoinGameResponse()
         {
-            Session = joinLobbyResponse.Data.Id,
+            Session = lobby.Id,
             Board = chessBoard.ToFen(),
             OpponentId = context.PlayerId,
             IsWhite = !isWhite
         };
         await _pushClient.SendPlayerMessageAsync(
-            context, 
+            context,
             JsonConvert.SerializeObject(message),
             "opponentJoined",
             opponentId);
 
         return new JoinGameResponse()
         {
-            Session = joinLobbyResponse.Data.Id,
+            Session = lobby.Id,
             Board = chessBoard.ToFen(),
             OpponentId = opponentId,
-            IsWhite = isWhite 
+            IsWhite = isWhite
+        };
+    }
+
+    private async Task<JoinGameResponse> Rejoin(IExecutionContext context, Lobby lobby)
+    {
+        var saveResponse =
+            await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
+                lobby.Id, new List<string> { "board", "whitePlayerId", "blackPlayerId" });
+
+        var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
+        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);;
+        var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
+        
+        var playerIsWhite = whitePlayer == context.PlayerId;
+        
+        return new JoinGameResponse()
+        {
+            Session = lobby.Id,
+            Board = chessBoard.ToFen(),
+            OpponentId = opponentId,
+            IsWhite = playerIsWhite 
         };
     }
 
@@ -148,6 +184,7 @@ public class Chess
                 context,
                 opponentId,
                 playerScore);
+            await _gameApiClient.Lobby.DeleteLobbyAsync(context, context.ServiceToken, session);
         }
         return boardUpdatedResponse;
     }
@@ -200,6 +237,12 @@ public class Chess
         {
             return new Dictionary<string, string> { { "error", "Error clearing the board" } };
         }
+    }
+
+    [CloudCodeFunction("Resign")]
+    public async Task Resign(IExecutionContext context, string session)
+    {
+        
     }
 }
 
