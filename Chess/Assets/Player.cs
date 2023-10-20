@@ -14,6 +14,7 @@ using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.Analytics;
 using UnityEngine.InputSystem;
 using UnityEngine.Serialization;
 using UnityEngine.SocialPlatforms.Impl;
@@ -23,20 +24,24 @@ public class Player : MonoBehaviour
 {
     private GameObject _selectedPiece;
     public Camera playerCamera;
-    public GameObject boardPivot;
+    public GameObject cameraPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
+    
     public TextMeshProUGUI playerNameText;
     public TextMeshProUGUI playerEloText;
+    public TextMeshProUGUI opponentNameText;
+    public TextMeshProUGUI opponentEloText;
+    
     public GameObject uiPanel;
     public TextMeshProUGUI resultText;
     public GameObject board;
     
     private readonly Dictionary<string, UnityEngine.Object> _prefabs = new();
-    private Lobby _currentLobby;
     private const string StartingBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     private bool _gameStarted;
     private bool _isWhite;
+    private string _currentSession;
 
     private readonly Color32 _selectedColor = new (84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
@@ -46,47 +51,40 @@ public class Player : MonoBehaviour
     {
         await UnityServices.InitializeAsync();
         await AuthenticationService.Instance.SignInAnonymouslyAsync();
-        playerNameText.text = AuthenticationService.Instance.PlayerId;
         await SubscribeToPlayerMessages();
-        SyncBoard(FenToDict(StartingBoard));
-        RefreshPlayerElo();
+        SyncBoard(StartingBoard);
+        RefreshPlayerInfo();
     }
 
-    private async Task RefreshPlayerElo()
+    private async Task RefreshPlayerInfo()
     {
         var response = await LeaderboardsService.Instance.GetPlayerScoreAsync("EloRatings");
+        
         playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
+        playerNameText.text = response.PlayerName;
+    }
+
+    private async Task SetOpponentInfo(string opponentId)
+    {
+        Debug.Log($"Setting opponent info");
+        var response = await LeaderboardsService.Instance.GetScoresByPlayerIdsAsync("EloRatings", new List<string>(){opponentId});
+        var opponent = response?.Results?.FirstOrDefault();
+        Debug.Log($"Setting opponent info {opponent?.PlayerId}");
+        opponentEloText.text = "Rating: " + Math.Round(opponent?.Score ?? 1500);
+        opponentNameText.text = opponent?.PlayerName ?? "Unknown";
     }
 
     public async void CreateGame()
     {
-        const int maxPlayers = 2;
-        var options = new CreateLobbyOptions
-        {
-            IsPrivate = false,
-            Player = new Unity.Services.Lobbies.Models.Player(
-                id: AuthenticationService.Instance.PlayerId,
-                data: new Dictionary<string, PlayerDataObject>()
-                {
-                    {
-                        "colour", new PlayerDataObject(
-                            visibility: PlayerDataObject.VisibilityOptions
-                                .Member, // Visible only to members of the lobby.
-                            value: "white")
-                    }
-                })
-        };
-        _isWhite = true;
-        SetPov();
-        _currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyCodeText.text, maxPlayers, options);
-        JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+        var hostGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>("ChessCloudCode", "HostGame");
+        
+        lobbyCodeText.text = hostGameResponse.LobbyCode;
     }
 
     private void SetPov()
     {
         var angle = _isWhite ? 0 : 180;
-        var currentRotation = boardPivot.transform.rotation.eulerAngles;
-        boardPivot.transform.rotation = Quaternion.Euler(currentRotation.x, angle, currentRotation.z);
+        cameraPivot.transform.eulerAngles = new Vector3(0, angle, 0);
     }
 
     public async void JoinLobbyByCode()
@@ -95,11 +93,12 @@ public class Player : MonoBehaviour
         {
             // There's a weird no space character that gets added to the end of the lobby code, let's remove it for now
             var sanitizedLobbyCode = Regex.Replace(lobbyInputCodeText.text, @"\s", "").Replace("\u200B", "");
-            _currentLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(sanitizedLobbyCode);
-            lobbyCodeText.text = _currentLobby.LobbyCode;
-            JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
-            _isWhite = false;
-            SetPov();
+            
+            var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
+                new Dictionary<string, object> { { "lobbyCode", sanitizedLobbyCode } });
+            lobbyCodeText.text = sanitizedLobbyCode;
+            
+            OnGameStart(joinGameResponse);
         }
         catch (LobbyServiceException exception)
         {
@@ -107,32 +106,9 @@ public class Player : MonoBehaviour
         }
     }
 
-    private async void JoinGame(string lobbyId, string lobbyCode)
+    private void SyncBoard(string fen)
     {
-        try
-        {
-            lobbyCodeText.text = lobbyCode;
-            var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
-                new Dictionary<string, object> { { "session", lobbyId } });
-            if (!joinGameResponse.Board.IsNullOrEmpty())
-            {
-                SyncBoard(FenToDict(joinGameResponse.Board));
-                uiPanel.SetActive(false);    
-            }
-            else
-            {
-                throw new Exception(joinGameResponse.Error);
-            }
-            _gameStarted = true;
-        }
-        catch (CloudCodeException exception)
-        {
-            Debug.LogException(exception);
-        }
-    }
-
-    private void SyncBoard(Dictionary<Tuple<int, int>, char> boardState)
-    {
+        var boardState = FenToDict(fen);
         try
         {
             foreach (Transform child in board.transform)
@@ -171,26 +147,41 @@ public class Player : MonoBehaviour
     private async void MakeMove(GameObject piece, Vector3 toPos)
     {
         if (piece == null) return;
-        try
-        {
-            var result = await CloudCodeService.Instance.CallModuleEndpointAsync("ChessCloudCode", "MakeMove",
-                new Dictionary<string, object>
-                    { { "session", _currentLobby.Id }, { "fromPosition", PosToFen(piece.transform.position) }, { "toPosition", PosToFen(toPos) } });
-            Debug.Log(result);
-            SelectPiece(null);
-            var response = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
-            SyncBoard(FenToDict(response["board"]));
-            if (response.ContainsKey("result"))
+        var result = await CloudCodeService.Instance.CallModuleEndpointAsync<MakeMoveResponse>(
+            "ChessCloudCode", 
+            "MakeMove",
+            new Dictionary<string, object>
             {
-                uiPanel.SetActive(true);
-                resultText.text = response["result"];
-                RefreshPlayerElo();
-            }
-        }
-        catch (CloudCodeException exception)
+                { "session", _currentSession }, 
+                { "fromPosition", PosToFen(piece.transform.position) },
+                { "toPosition", PosToFen(toPos) }
+            });
+
+        SelectPiece(null);
+        OnMove(result);
+    }
+
+    private async void OnMove(MakeMoveResponse makeMoveResponse)
+    {
+        SyncBoard(makeMoveResponse.Board);
+        if (makeMoveResponse.GameOver)
         {
-            Debug.LogException(exception);
+            uiPanel.SetActive(true);
+            resultText.text = makeMoveResponse.EndgameType;
+            RefreshPlayerInfo();
         }
+    }
+
+    private async void OnGameStart(JoinGameResponse joinGameResponse)
+    {
+        Debug.Log($"Opponent joined: {joinGameResponse.OpponentId}");
+        _currentSession = joinGameResponse.Session;
+        SetOpponentInfo(joinGameResponse.OpponentId);
+        SyncBoard(joinGameResponse.Board);
+        uiPanel.SetActive(false);
+        _isWhite = joinGameResponse.IsWhite;
+        SetPov();
+        _gameStarted = true;
     }
 
     private Task SubscribeToPlayerMessages()
@@ -201,22 +192,16 @@ public class Player : MonoBehaviour
             switch (@event.MessageType)
             {
                 case "boardUpdated":
-                {
-                    var message = JsonConvert.DeserializeObject<BoardUpdatedMessage>(@event.Message);
-                    SyncBoard(FenToDict(message.Board));
-                    if (message.GameOver)
-                    {
-                        uiPanel.SetActive(true);
-                        resultText.text = message.EndgameType;
-                        RefreshPlayerElo();
-                    }
+                    var message = JsonConvert.DeserializeObject<MakeMoveResponse>(@event.Message);
+                    OnMove(message);
                     break;
-                }
+                case "opponentJoined":
+                    var opponentJoinedMessage = JsonConvert.DeserializeObject<JoinGameResponse>(@event.Message);
+                    OnGameStart(opponentJoinedMessage);
+                    break;
                 case "clearBoard":
-                {
-                    SyncBoard(FenToDict(StartingBoard));
+                    SyncBoard(StartingBoard);
                     break;
-                }
                 default:
                     Debug.Log($"Got unsupported player Message: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
                     break;
@@ -224,9 +209,10 @@ public class Player : MonoBehaviour
         };
         callbacks.ConnectionStateChanged += @event =>
         {
-            if (@event == EventConnectionState.Subscribed && _currentLobby != null && _gameStarted)
+            if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted)
             {
-                JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+                Debug.Log($"LADJLKDSAFJ");
+                //JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
             }
             Debug.Log($"Got player subscription ConnectionStateChanged: {@event.ToString()}");
         };
@@ -243,7 +229,7 @@ public class Player : MonoBehaviour
 
     public void PlayerInteract(InputAction.CallbackContext context)
     {
-        if (!context.performed && _currentLobby != null) return;
+        if (!context.performed && _currentSession != null) return;
         var mousePosition = Mouse.current.position.ReadValue();
         var rayOrigin = playerCamera.ScreenPointToRay(mousePosition);
         if (Physics.Raycast(rayOrigin, out var hitInfo))
@@ -317,21 +303,25 @@ public class Player : MonoBehaviour
         selectedRenderer.material.color = newColor;
     }
     
-    private class JoinGameResponse
+    public class HostGameResponse
     {
-        public string Board { get; set; }
-        public string Error { get; set; }
+        public string LobbyCode { get; set; }
     }    
     
-    private class BoardUpdatedMessage
+    public class MakeMoveResponse
     {
-        public string Session { get; set; }
         public string Board { get; set; }
-        public string Type = "boardUpdated";
         public bool GameOver { get; set; }
         public string EndgameType { get; set; }
     }
 
+    public class JoinGameResponse
+    {        
+        public string Session { get; set; }
+        public string Board { get; set; }
+        public string OpponentId { get; set; }
+        public bool IsWhite { get; set; }
+    }
 
     private string PosToFen(Vector3 pos)
     {

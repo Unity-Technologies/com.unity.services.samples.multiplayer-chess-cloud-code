@@ -5,6 +5,7 @@ using Unity.Services.CloudSave.Model;
 using Chess;
 using Microsoft.Extensions.Logging;
 using Unity.Services.Leaderboards.Model;
+using Unity.Services.Lobby.Model;
 
 namespace ChessCloudCode;
 
@@ -13,135 +14,142 @@ public class Chess
     private const string LeaderboardId = "EloRatings";
     private const int KValue = 30;
     private const int StartingElo = 1500;
+    
     private readonly IGameApiClient _gameApiClient;
     private readonly IPushClient _pushClient;
     private readonly ILogger<Chess> _logger;
+    private readonly Random _rng;
 
-    public Chess(IGameApiClient gameApiClient, IPushClient pushClient, ILogger<Chess> logger)
+    public Chess(IGameApiClient gameApiClient, IPushClient pushClient, ILogger<Chess> logger, Random rng)
     {
         _gameApiClient = gameApiClient;
         _pushClient = pushClient;
         _logger = logger;
+        _rng = rng;
     }
-    
-    [CloudCodeFunction("JoinGame")]
-    public async Task<Dictionary<string, string>> JoinGame(IExecutionContext context, string session)
+
+    [CloudCodeFunction("HostGame")]
+    public async Task<HostGameResponse> HostGame(IExecutionContext context)
     {
-        try
-        {
-            // Get the current board state
-            var boardResponse = await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken,
-                context.ProjectId,
-                session, new List<string> { "board" });
+        var lobbyResult = await _gameApiClient.Lobby.CreateLobbyAsync(context, context.AccessToken, null, null,
+            new CreateRequest($"{context.PlayerId}'s game", 2, false, false, new Player(context.PlayerId)));
+        
+        var chessBoard = new ChessBoard();
+        await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
+            lobbyResult.Data.Id,
+            new SetItemBatchBody(new List<SetItemBody>(){ 
+                new("board", chessBoard.ToFen()),
+                new("whitePlayerId", context.PlayerId)
+            }));
 
-            // If no board exists, create a new one
-            ChessBoard chessBoard;
-            if (boardResponse.Data.Results.Count == 0)
-            {
-                chessBoard = new ChessBoard();
-                await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
-                    session,
-                    new SetItemBody("board", chessBoard.ToFen()));
-            }
-            else
-            {
-                // Otherwise, load the board from the saved state
-                chessBoard = ChessBoard.LoadFromFen(boardResponse.Data.Results.First().Value.ToString()!);
-            }
-
-            return new Dictionary<string, string>
-                { { "board", chessBoard.ToFen() } };
-        }
-        catch (Exception)
+        return new HostGameResponse()
         {
-            return new Dictionary<string, string> { { "error", "Error loading the board" } };
-        }
+            LobbyCode = lobbyResult.Data.LobbyCode,
+        };
+    }
+
+    [CloudCodeFunction("JoinGame")]
+    public async Task<JoinGameResponse> JoinGame(IExecutionContext context, string lobbyCode)
+    {
+        var joinLobbyResponse = await _gameApiClient.Lobby.JoinLobbyByCodeAsync(context, context.AccessToken,
+            joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId)));
+
+        var isWhite = _rng.Next(0, 2) == 0;        
+        var opponentId = joinLobbyResponse.Data.Players.Select(p => p.Id).First(id => id != context.PlayerId);
+
+        var chessBoard = new ChessBoard();
+        await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
+            joinLobbyResponse.Data.Id,
+            new SetItemBatchBody(new List<SetItemBody>(){ 
+                new("board", chessBoard.ToFen()),
+                new("whitePlayerId", isWhite ? context.PlayerId : opponentId),
+                new("blackPlayerId", isWhite ? opponentId : context.PlayerId)
+            }));
+
+        var message = new JoinGameResponse()
+        {
+            Session = joinLobbyResponse.Data.Id,
+            Board = chessBoard.ToFen(),
+            OpponentId = context.PlayerId,
+            IsWhite = !isWhite
+        };
+        await _pushClient.SendPlayerMessageAsync(
+            context, 
+            JsonConvert.SerializeObject(message),
+            "opponentJoined",
+            opponentId);
+
+        return new JoinGameResponse()
+        {
+            Session = joinLobbyResponse.Data.Id,
+            Board = chessBoard.ToFen(),
+            OpponentId = opponentId,
+            IsWhite = isWhite 
+        };
     }
 
     [CloudCodeFunction("MakeMove")]
-    public async Task<Dictionary<string, string>> MakeMove(IExecutionContext context, string session, string fromPosition, string toPosition)
+    public async Task<MakeMoveResponse> MakeMove(IExecutionContext context, string session, string fromPosition, string toPosition)
     {
-        try
+        var saveResponse =
+            await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
+                session, new List<string> { "board", "whitePlayerId", "blackPlayerId" });
+
+        var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
+        var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
+        var blackPlayer = saveResponse.Data.Results.Find(r => r.Key == "blackPlayerId").Value.ToString();
+        
+        var playerIsWhite = whitePlayer == context.PlayerId;
+
+        var playerColour = context.PlayerId switch
         {
-            // Get the current board state and lobby
-            var lobbyRequest =
-                _gameApiClient.Lobby.GetLobbyAsync(context, context.AccessToken, session);
-            var boardResponse =
-                await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
-                    session, new List<string> { "board" });
-
-            var chessBoard = ChessBoard.LoadFromFen(boardResponse.Data.Results.First().Value.ToString()!);
-
-            var lobbyResponse = await lobbyRequest;
-            var player = lobbyResponse.Data.Players.Find(p => p.Id == context.PlayerId);
-            var whitePlayer = lobbyResponse.Data.Players.Find(d => d.Data.ContainsKey("colour") && d.Data["colour"].Value == "white").Id;
-            var activePlayerColour = player?.Id == whitePlayer ? 1 : 2;
-            
-            if (activePlayerColour != chessBoard.Turn.Value)
-            {
-                return new Dictionary<string, string>
-                {
-                    { "error", $"Invalid move, not active player" }, 
-                    { "board", chessBoard.ToFen() }
-                };
-            }
-            
-            // Check if the move is valid according to chess rules
-            if (!chessBoard.IsValidMove(new Move(fromPosition, toPosition)))
-            {
-                return new Dictionary<string, string>
-                {
-                    { "error", $"Invalid move from {fromPosition} to {toPosition}" },
-                    { "board", chessBoard.ToFen() }
-                };
-            }
-            var validMove = chessBoard.Move(new Move(fromPosition, toPosition));
-            if (!validMove) return new Dictionary<string, string> {
-            {
-                "board", chessBoard.ToFen()
-            } };
-
-            // Save the new board state
-            await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
-                session,
-                new SetItemBody("board", chessBoard.ToFen()));
-
-            // Send the updated board state to the other player
-            var otherPlayer = lobbyResponse.Data.Players.Find(p => p.Id != context.PlayerId);
-            if (otherPlayer == null) return new Dictionary<string, string> { { "board", chessBoard.ToFen() } };
-            var message = new BoardUpdatedMessage
-            {
-                Session = session, 
-                Board = chessBoard.ToFen(), 
-                GameOver = chessBoard.IsEndGame, 
-                EndgameType = chessBoard.EndGame?.EndgameType.ToString()
-            };
-            await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(message), message.Type,
-                otherPlayer!.Id);
-                
-            if (chessBoard.IsEndGame)
-            {
-                var playerScore = activePlayerColour == chessBoard.EndGame.WonSide ? 1 :
-                    chessBoard.EndGame.WonSide == null ? 0.5 : 0;
-                await UpdateElos(
-                    context,
-                    otherPlayer.Id,
-                    playerScore);
-                return new Dictionary<string, string>
-                {
-                    { "board", chessBoard.ToFen() },
-                    { "result", chessBoard.EndGame.EndgameType.ToString()}
-                };
-            }
-            return new Dictionary<string, string> { { "board", chessBoard.ToFen() } };
-        }
-        catch (Exception exception)
+            var value when value == whitePlayer => PieceColor.White,                
+            var value when value == blackPlayer => PieceColor.Black,
+            _ => throw new Exception("Player is not in the game")
+        };
+        
+        // Check if it is the moving player's turn
+        if (chessBoard.Turn != playerColour)
         {
-            _logger.Log(LogLevel.Error, exception.Message);
-            _logger.Log(LogLevel.Error, exception.StackTrace);
-            return new Dictionary<string, string>
-                { { "error", exception.Message }, { "stackTrace", exception.StackTrace }, {"board", new ChessBoard().ToFen()} };
+            _logger.LogInformation($"{chessBoard.Turn} = {playerColour}");
+            throw new Exception("Invalid move, not active player");
         }
+        
+        // Check if the move is valid according to chess rules
+        if (!chessBoard.IsValidMove(new Move(fromPosition, toPosition)))
+        {
+            throw new Exception($"Invalid move from {fromPosition} to {toPosition}");
+        }
+        
+        // Make the move
+        chessBoard.Move(new Move(fromPosition, toPosition));
+
+        // Save the new board state
+        await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
+            session,
+            new SetItemBody("board", chessBoard.ToFen()));
+
+        // Send the updated board state to the other player
+        var opponentId = playerIsWhite ? blackPlayer : whitePlayer;
+        var boardUpdatedResponse = new MakeMoveResponse
+        {
+            Board = chessBoard.ToFen(), 
+            GameOver = chessBoard.IsEndGame, 
+            EndgameType = chessBoard.EndGame?.EndgameType.ToString()
+        };
+        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
+            opponentId);
+            
+        if (chessBoard.IsEndGame)
+        {
+            var playerScore = playerColour == chessBoard.EndGame.WonSide ? 1 :
+                chessBoard.EndGame.WonSide == null ? 0.5 : 0;
+            await UpdateElos(
+                context,
+                opponentId,
+                playerScore);
+        }
+        return boardUpdatedResponse;
     }
 
     public async Task UpdateElos(IExecutionContext context, string opponentId, double playerScore)
@@ -193,18 +201,29 @@ public class Chess
             return new Dictionary<string, string> { { "error", "Error clearing the board" } };
         }
     }
+}
 
-    private class BoardUpdatedMessage
-    {
-        public string Session { get; set; }
-        public string Board { get; set; }
-        public string Type = "boardUpdated";
-        public bool GameOver { get; set; }
-        public string EndgameType { get; set; }
-    }
+public class HostGameResponse
+{
+    public string LobbyCode { get; set; }
+}
 
-    private class ClearBoardMessage
-    {
-        public string Session { get; set; }
-    }
+public class JoinGameResponse
+{    
+    public string Session { get; set; }
+    public string Board { get; set; }
+    public string OpponentId { get; set; }
+    public bool IsWhite { get; set; }
+}
+
+public class MakeMoveResponse
+{
+    public string Board { get; set; }
+    public bool GameOver { get; set; }
+    public string EndgameType { get; set; }
+}
+
+public class ClearBoardMessage
+{
+    public string Session { get; set; }
 }
