@@ -125,7 +125,7 @@ public class Chess
     }
 
     [CloudCodeFunction("MakeMove")]
-    public async Task<MakeMoveResponse> MakeMove(IExecutionContext context, string session, string fromPosition, string toPosition)
+    public async Task<BoardUpdateResponse> MakeMove(IExecutionContext context, string session, string fromPosition, string toPosition)
     {
         var saveResponse =
             await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
@@ -177,7 +177,7 @@ public class Chess
                 playerScore);
         }
         
-        var boardUpdatedResponse = new MakeMoveResponse
+        var boardUpdatedResponse = new BoardUpdateResponse
         {
             Board = chessBoard.ToFen(), 
             GameOver = chessBoard.IsEndGame, 
@@ -214,7 +214,7 @@ public class Chess
     }
 
     [CloudCodeFunction("Resign")]
-    public async Task<MakeMoveResponse> Resign(IExecutionContext context, string session)
+    public async Task<BoardUpdateResponse> Resign(IExecutionContext context, string session)
     {
         var saveResponse =
             await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
@@ -246,7 +246,7 @@ public class Chess
             opponentId,
             playerScore);
         
-        var boardUpdatedResponse = new MakeMoveResponse
+        var boardUpdatedResponse = new BoardUpdateResponse
         {
             Board = chessBoard.ToFen(), 
             GameOver = chessBoard.IsEndGame, 
@@ -271,7 +271,7 @@ public class JoinGameResponse
     public bool IsWhite { get; set; }
 }
 
-public class MakeMoveResponse
+public class BoardUpdateResponse
 {
     public string Board { get; set; }
     public bool GameOver { get; set; }

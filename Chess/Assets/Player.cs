@@ -93,7 +93,7 @@ public class Player : MonoBehaviour
     {
         try
         {
-            var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<MakeMoveResponse>("ChessCloudCode", "Resign",
+            var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>("ChessCloudCode", "Resign",
                 new Dictionary<string, object> { { "session", _currentSession } });
             OnMove(boardUpdate);
         }
@@ -163,7 +163,7 @@ public class Player : MonoBehaviour
     private async void MakeMove(GameObject piece, Vector3 toPos)
     {
         if (piece == null) return;
-        var result = await CloudCodeService.Instance.CallModuleEndpointAsync<MakeMoveResponse>(
+        var result = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>(
             "ChessCloudCode", 
             "MakeMove",
             new Dictionary<string, object>
@@ -177,14 +177,14 @@ public class Player : MonoBehaviour
         OnMove(result);
     }
 
-    private async void OnMove(MakeMoveResponse makeMoveResponse)
+    private async void OnMove(BoardUpdateResponse boardUpdateResponse)
     {
-        SyncBoard(makeMoveResponse.Board);
-        if (makeMoveResponse.GameOver)
+        SyncBoard(boardUpdateResponse.Board);
+        if (boardUpdateResponse.GameOver)
         {
             uiPanel.SetActive(true);
             resignButton.SetActive(false);
-            resultText.text = makeMoveResponse.EndgameType;
+            resultText.text = boardUpdateResponse.EndgameType;
             RefreshPlayerInfo();
         }
     }
@@ -210,15 +210,12 @@ public class Player : MonoBehaviour
             switch (@event.MessageType)
             {
                 case "boardUpdated":
-                    var message = JsonConvert.DeserializeObject<MakeMoveResponse>(@event.Message);
+                    var message = JsonConvert.DeserializeObject<BoardUpdateResponse>(@event.Message);
                     OnMove(message);
                     break;
                 case "opponentJoined":
                     var opponentJoinedMessage = JsonConvert.DeserializeObject<JoinGameResponse>(@event.Message);
                     OnGameStart(opponentJoinedMessage);
-                    break;
-                case "clearBoard":
-                    SyncBoard(StartingBoard);
                     break;
                 default:
                     Debug.Log($"Got unsupported player Message: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
@@ -324,7 +321,7 @@ public class Player : MonoBehaviour
         public string LobbyCode { get; set; }
     }    
     
-    public class MakeMoveResponse
+    public class BoardUpdateResponse
     {
         public string Board { get; set; }
         public bool GameOver { get; set; }
