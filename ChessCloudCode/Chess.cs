@@ -213,31 +213,6 @@ public class Chess
         await Task.WhenAll(tasks);
     }
 
-    [CloudCodeFunction("ClearBoard")]
-    public async Task<Dictionary<string, string>> ClearBoard(IExecutionContext context, string session)
-    {
-        try
-        {
-            // Clear the board state and send a message to all players to clear their boards
-            await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
-                session,
-                new SetItemBody("board", new ChessBoard().ToFen()));
-            var lobbyResponse = await _gameApiClient.Lobby.GetLobbyAsync(context, context.ServiceToken, session);
-            foreach (var player in lobbyResponse.Data.Players)
-            {
-                var clearBoardMessage = new ClearBoardMessage { Session = session };
-                await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(clearBoardMessage),
-                    "clearBoard", player.Id);
-            }
-
-            return new Dictionary<string, string> { { "cleared", "true" } };
-        }
-        catch (Exception)
-        {
-            return new Dictionary<string, string> { { "error", "Error clearing the board" } };
-        }
-    }
-
     [CloudCodeFunction("Resign")]
     public async Task<MakeMoveResponse> Resign(IExecutionContext context, string session)
     {
@@ -301,9 +276,4 @@ public class MakeMoveResponse
     public string Board { get; set; }
     public bool GameOver { get; set; }
     public string EndgameType { get; set; }
-}
-
-public class ClearBoardMessage
-{
-    public string Session { get; set; }
 }
