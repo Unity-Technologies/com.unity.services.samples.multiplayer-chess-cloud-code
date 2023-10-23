@@ -55,7 +55,7 @@ public class Chess
         {
             var joinLobbyResponse = await _gameApiClient.Lobby.JoinLobbyByCodeAsync(context, context.AccessToken,
                 joinByCodeRequest: new JoinByCodeRequest(lobbyCode, new Player(context.PlayerId)));
-            return await CreateNewGame(context, joinLobbyResponse.Data);
+            return await StartGame(context, joinLobbyResponse.Data);
         }
         catch (Exception e)
         {
@@ -66,10 +66,10 @@ public class Chess
         }
     }
 
-    private async Task<JoinGameResponse> CreateNewGame(IExecutionContext context, Lobby lobby)
+    private async Task<JoinGameResponse> StartGame(IExecutionContext context, Lobby lobby)
     {
         var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);
-        var isWhite = _rng.Next(0, 2) == 0;
+        var isWhite = _rng.NextDouble() >= 0.5;
 
         var chessBoard = new ChessBoard();
         await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
@@ -150,7 +150,7 @@ public class Chess
             _logger.LogInformation($"{chessBoard.Turn} = {playerColour}");
             throw new Exception("Invalid move, not active player");
         }
-        
+
         // Check if the move is valid according to chess rules
         if (!chessBoard.IsValidMove(new Move(fromPosition, toPosition)))
         {
@@ -165,16 +165,7 @@ public class Chess
             session,
             new SetItemBody("board", chessBoard.ToFen()));
 
-        // Send the updated board state to the other player
         var opponentId = playerIsWhite ? blackPlayer : whitePlayer;
-        var boardUpdatedResponse = new MakeMoveResponse
-        {
-            Board = chessBoard.ToFen(), 
-            GameOver = chessBoard.IsEndGame, 
-            EndgameType = chessBoard.EndGame?.EndgameType.ToString()
-        };
-        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
-            opponentId);
             
         if (chessBoard.IsEndGame)
         {
@@ -184,8 +175,16 @@ public class Chess
                 context,
                 opponentId,
                 playerScore);
-            await _gameApiClient.Lobby.DeleteLobbyAsync(context, context.ServiceToken, session);
         }
+        
+        var boardUpdatedResponse = new MakeMoveResponse
+        {
+            Board = chessBoard.ToFen(), 
+            GameOver = chessBoard.IsEndGame, 
+            EndgameType = chessBoard.EndGame?.EndgameType.ToString()
+        };
+        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
+            opponentId);
         return boardUpdatedResponse;
     }
 
@@ -240,9 +239,47 @@ public class Chess
     }
 
     [CloudCodeFunction("Resign")]
-    public async Task Resign(IExecutionContext context, string session)
+    public async Task<MakeMoveResponse> Resign(IExecutionContext context, string session)
     {
+        var saveResponse =
+            await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
+                session, new List<string> { "board", "whitePlayerId", "blackPlayerId" });
+
+        var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
+        var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
+        var blackPlayer = saveResponse.Data.Results.Find(r => r.Key == "blackPlayerId").Value.ToString();
+
+        var playerColour = context.PlayerId switch
+        {
+            var value when value == whitePlayer => PieceColor.White,                
+            var value when value == blackPlayer => PieceColor.Black,
+            _ => throw new Exception("Player is not in the game")
+        };
         
+        chessBoard.Resign(playerColour);
+        
+        await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
+            session,
+            new SetItemBody("board", chessBoard.ToFen()));
+        
+        var playerIsWhite = whitePlayer == context.PlayerId;
+        var opponentId = playerIsWhite ? blackPlayer : whitePlayer;
+        var playerScore = playerColour == chessBoard.EndGame.WonSide ? 1 :
+            chessBoard.EndGame.WonSide == null ? 0.5 : 0;
+        await UpdateElos(
+            context,
+            opponentId,
+            playerScore);
+        
+        var boardUpdatedResponse = new MakeMoveResponse
+        {
+            Board = chessBoard.ToFen(), 
+            GameOver = chessBoard.IsEndGame, 
+            EndgameType = chessBoard.EndGame?.EndgameType.ToString()
+        };
+        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
+            opponentId);
+        return boardUpdatedResponse;
     }
 }
 

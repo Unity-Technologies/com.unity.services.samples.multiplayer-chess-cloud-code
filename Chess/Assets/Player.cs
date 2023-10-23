@@ -32,7 +32,8 @@ public class Player : MonoBehaviour
     public TextMeshProUGUI playerEloText;
     public TextMeshProUGUI opponentNameText;
     public TextMeshProUGUI opponentEloText;
-    
+
+    public GameObject resignButton;
     public GameObject uiPanel;
     public TextMeshProUGUI resultText;
     public GameObject board;
@@ -54,6 +55,7 @@ public class Player : MonoBehaviour
         await SubscribeToPlayerMessages();
         SyncBoard(StartingBoard);
         RefreshPlayerInfo();
+        resignButton.SetActive(false);
     }
 
     private async Task RefreshPlayerInfo()
@@ -87,6 +89,20 @@ public class Player : MonoBehaviour
         cameraPivot.transform.eulerAngles = new Vector3(0, angle, 0);
     }
 
+    public async void Resign()
+    {
+        try
+        {
+            var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<MakeMoveResponse>("ChessCloudCode", "Resign",
+                new Dictionary<string, object> { { "session", _currentSession } });
+            OnMove(boardUpdate);
+        }
+        catch (LobbyServiceException exception)
+        {
+            Debug.LogException(exception);
+        }
+    }
+    
     public async void JoinLobbyByCode()
     {
         try
@@ -167,6 +183,7 @@ public class Player : MonoBehaviour
         if (makeMoveResponse.GameOver)
         {
             uiPanel.SetActive(true);
+            resignButton.SetActive(false);
             resultText.text = makeMoveResponse.EndgameType;
             RefreshPlayerInfo();
         }
@@ -179,6 +196,7 @@ public class Player : MonoBehaviour
         SetOpponentInfo(joinGameResponse.OpponentId);
         SyncBoard(joinGameResponse.Board);
         uiPanel.SetActive(false);
+        resignButton.SetActive(true);
         _isWhite = joinGameResponse.IsWhite;
         SetPov();
         _gameStarted = true;
@@ -211,8 +229,6 @@ public class Player : MonoBehaviour
         {
             if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted)
             {
-                Debug.Log($"LADJLKDSAFJ");
-                //JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
             }
             Debug.Log($"Got player subscription ConnectionStateChanged: {@event.ToString()}");
         };
