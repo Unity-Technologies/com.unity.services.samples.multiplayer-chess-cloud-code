@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using System.Text;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -193,22 +194,46 @@ public class ChessClubScripts
                 { {"success", false}, { "error", exception.Message }, { "stackTrace", exception.StackTrace } };
         }
     }
-    
+
     [CloudCodeFunction("SearchClubs")]
-    public async Task<Dictionary<string, object>> SearchClubs(IExecutionContext context, IGameApiClient gameApiClient)
+    public async Task<Dictionary<string, object>> SearchClubs(IExecutionContext context, IGameApiClient gameApiClient,
+        string name, string country, string memberCountSort)
     {
         try
         {
+            var filters = new List<FieldFilter>
+            {
+                new FieldFilter("entityType", "club", FieldFilter.OpEnum.EQ, true),
+                
+            };
+            
+            if (!string.IsNullOrWhiteSpace(country))
+            {
+                filters.Add(new FieldFilter("country", country, FieldFilter.OpEnum.EQ, true));
+            }
+            
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                filters.Add(new FieldFilter("name", name, FieldFilter.OpEnum.GE, true));
+                var prefixEndBuilder = new StringBuilder(name);
+                prefixEndBuilder[^1]++;
+                filters.Add(new FieldFilter("name", prefixEndBuilder.ToString(), FieldFilter.OpEnum.LT, true));
+            } else if (string.IsNullOrWhiteSpace(memberCountSort))
+            {
+                filters.Add(new FieldFilter("name", "", FieldFilter.OpEnum.GE, true));
+            }
+
+            if (!string.IsNullOrWhiteSpace(memberCountSort))
+            {
+                filters.Add(new FieldFilter("memberCount", 0, FieldFilter.OpEnum.GE, memberCountSort == "asc"));
+            }
+
             var cloudSaveResponse = await gameApiClient.CloudSaveData.QueryDefaultCustomDataAsync(context,
-                context.ServiceToken, context.ProjectId, new QueryIndexBody(
-                    new List<FieldFilter>
-                    {
-                        new FieldFilter("entityType", "club", FieldFilter.OpEnum.EQ, true),
-                        new FieldFilter("name", "", FieldFilter.OpEnum.GE, true)
-                    }, new List<string>
+                context.ServiceToken, context.ProjectId, new QueryIndexBody(filters, new List<string>
                     {
                         "id", "name", "country", "memberCount"
                     }));
+            
             var clubs = cloudSaveResponse.Data.Results.Select(r => new ChessClub
             {
                 Id = GetCloudSaveValue<Guid>(r.Data, "id").Value,
@@ -217,15 +242,20 @@ public class ChessClubScripts
                 Country = GetCloudSaveValue<string>(r.Data, "country").Value,
             }).ToList();
             
-            return new Dictionary<string, object> { {"success", true}, {"clubs", clubs} };
+            if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(memberCountSort))
+            {
+                clubs.Sort((c1, c2) => (c1.MemberCount - c2.MemberCount) * (memberCountSort == "asc" ? 1 : -1));
+            }
+
+            return new Dictionary<string, object> { { "success", true }, { "clubs", clubs } };
         }
         catch (Exception exception)
         {
             return new Dictionary<string, object>
-                { {"success", false}, { "error", exception.Message }, { "stackTrace", exception.StackTrace } };
+                { { "success", false }, { "error", exception.Message }, { "stackTrace", exception.StackTrace } };
         }
     }
-    
+
     [CloudCodeFunction("LoadClub")]
     public async Task<Dictionary<string, object>> LoadClub(IExecutionContext context, IGameApiClient gameApiClient, Guid id)
     {

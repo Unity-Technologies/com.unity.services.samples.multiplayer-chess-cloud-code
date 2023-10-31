@@ -20,7 +20,7 @@ public class Clubs : MonoBehaviour
     public GameObject searchClubsCanvas;
     public GameObject clubCanvas;
     public GameObject clubManagementCanvas;
-    
+
     public TMP_InputField clubIDInputText;
     public TextMeshProUGUI playerNameText;
     public TMP_InputField clubNameInputText;
@@ -30,6 +30,12 @@ public class Clubs : MonoBehaviour
 
     public ClubsView myClubsView;
     public ClubsView searchClubsView;
+
+    public TMP_InputField clubSearchNameInput;
+    public TMP_InputField clubSearchCountryInput;
+    public TMP_Dropdown clubSearchMemberCountSortInput;
+    public Button clubSearchSubmitButton;
+    public Button clubSearchClearButton;
 
     public MembersView clubMembersView;
     public MembersManagementView clubMembersManagementView;
@@ -45,6 +51,7 @@ public class Clubs : MonoBehaviour
             {
                 return;
             }
+
             clubNameText.text = value.Name;
             clubCountryText.text = value.Country;
             clubMembersHeaderText.text = $"Members ({value.MemberCount})";
@@ -74,8 +81,9 @@ public class Clubs : MonoBehaviour
             }
         }
     }
+
     private ChessClub _activeClub;
-    
+
     public Dictionary<string, string> JoinRequests
     {
         get => _joinRequests;
@@ -86,10 +94,12 @@ public class Clubs : MonoBehaviour
             {
                 return;
             }
+
             clubManagementRequestsHeaderText.text = $"Requests ({value.Count})";
             clubRequestsManagementView.UpdateMembersView(_activeClub.ID, value, AdmitMember, DenyMember);
         }
     }
+
     private Dictionary<string, string> _joinRequests;
 
     public TextMeshProUGUI clubNameText;
@@ -113,12 +123,11 @@ public class Clubs : MonoBehaviour
         searchClubsCanvas.SetActive(false);
         clubCanvas.SetActive(false);
         clubManagementCanvas.SetActive(false);
-        
+
         await UnityServices.InitializeAsync();
         if (!AuthenticationService.Instance.IsSignedIn)
         {
             await AuthenticationService.Instance.SignInAnonymouslyAsync();
-            Debug.Log(AuthenticationService.Instance.PlayerId);
         }
 
         playerNameText.text = AuthenticationService.Instance.PlayerId;
@@ -127,19 +136,14 @@ public class Clubs : MonoBehaviour
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public class ChessClub
     {
-        [JsonProperty]
-        public Guid ID { get; private set; }
+        [JsonProperty] public Guid ID { get; private set; }
         public string Name { get; set; }
-        [JsonProperty]
-        public List<string> Members { get; set; }
-        [JsonProperty]
-        public Dictionary<string,string> MemberNames { get; set; }
-        [JsonProperty]
-        public int MemberCount { get; set; }
+        [JsonProperty] public List<string> Members { get; set; }
+        [JsonProperty] public Dictionary<string, string> MemberNames { get; set; }
+        [JsonProperty] public int MemberCount { get; set; }
         public string Country { get; set; }
         public bool ApprovalRequired { get; set; }
-        [JsonProperty]
-        public string AdminId { get; private set; }
+        [JsonProperty] public string AdminId { get; private set; }
         public string MyStatus { get; set; }
 
         public ChessClub(string name, string country, bool approvalRequired)
@@ -163,20 +167,20 @@ public class Clubs : MonoBehaviour
     {
         public List<ChessClub> Clubs { get; set; }
     }
-    
+
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public class ClubResponse : CloudCodeResponse
     {
         public ChessClub Club { get; set; }
         public string MyStatus { get; set; }
     }
-    
+
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public class ClubJoinRequestsResponse : CloudCodeResponse
     {
         public Dictionary<string, string> Requests { get; set; }
     }
-    
+
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public class MemberManagementResponse : CloudCodeResponse
     {
@@ -191,7 +195,7 @@ public class Clubs : MonoBehaviour
     {
         public string Id { get; set; }
     }
-    
+
     [JsonObject(NamingStrategyType = typeof(CamelCaseNamingStrategy))]
     public class JoinClubResponse : CloudCodeResponse
     {
@@ -204,7 +208,7 @@ public class Clubs : MonoBehaviour
         landingCanvas.SetActive(false);
         creationCanvas.SetActive(true);
     }
-    
+
     public void ClubCreationToLanding()
     {
         clubCreationErrorText.text = "";
@@ -213,7 +217,7 @@ public class Clubs : MonoBehaviour
         clubApprovalRequiredToggle.isOn = false;
         creationCanvas.SetActive(false);
         landingCanvas.SetActive(true);
-    } 
+    }
 
     public async void CreateClub()
     {
@@ -222,6 +226,7 @@ public class Clubs : MonoBehaviour
             clubCreationErrorText.text = "invalid input: club name cannot be empty";
             return;
         }
+
         if (string.IsNullOrWhiteSpace(clubCountryInputText.text))
         {
             clubCreationErrorText.text = "invalid input: club country cannot be empty";
@@ -229,8 +234,9 @@ public class Clubs : MonoBehaviour
         }
 
         var club = new ChessClub(clubNameInputText.text, clubCountryInputText.text, clubApprovalRequiredToggle.isOn);
-        
-        var createClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubCreationResponse>("ChessClubCloudCode", "CreateClub",
+
+        var createClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubCreationResponse>(
+            "ChessClubCloudCode", "CreateClub",
             new Dictionary<string, object> { { "club", club } });
         if (createClubResponse.Success)
         {
@@ -258,10 +264,11 @@ public class Clubs : MonoBehaviour
             Debug.LogError("invalid input: club id cannot be empty");
             return;
         }
-        
-        var joinClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinClubResponse>("ChessClubCloudCode", "JoinClub",
+
+        var joinClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinClubResponse>(
+            "ChessClubCloudCode", "JoinClub",
             new Dictionary<string, object> { { "id", clubIDInputText.text } });
-        
+
         if (joinClubResponse.Success)
         {
             Debug.Log($"Successfully sent join request, status: {joinClubResponse.Status}");
@@ -277,12 +284,13 @@ public class Clubs : MonoBehaviour
 
         clubIDInputText.text = "";
     }
-    
+
     public async void JoinClubFromClubPage()
     {
-        var joinClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinClubResponse>("ChessClubCloudCode", "JoinClub",
+        var joinClubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinClubResponse>(
+            "ChessClubCloudCode", "JoinClub",
             new Dictionary<string, object> { { "id", ActiveClub.ID } });
-        
+
         if (joinClubResponse.Success)
         {
             var status = joinClubResponse.Status;
@@ -310,11 +318,13 @@ public class Clubs : MonoBehaviour
 
     private async Task ListMyClubs()
     {
-        var myClubsResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "ListMyClubs");
-        
+        var myClubsResponse =
+            await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "ListMyClubs");
+
         if (myClubsResponse.Success)
         {
-            myClubsView.UpdateClubsView(myClubsResponse.Clubs, myClubsResponse.Clubs.Select(c => c.ID).ToList(), OpenClubPage);
+            myClubsView.UpdateClubsView(myClubsResponse.Clubs, myClubsResponse.Clubs.Select(c => c.ID).ToList(),
+                OpenClubPage);
         }
         else
         {
@@ -322,14 +332,32 @@ public class Clubs : MonoBehaviour
             Debug.LogError(myClubsResponse.StackTrace);
         }
     }
-    
+
     private async Task SearchClubs()
     {
-        var searchClubsResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "SearchClubs");
-        var myClubsResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "ListMyClubs");
+        var searchParams = new Dictionary<string, object>
+        {
+            { "name", clubSearchNameInput.text },
+            { "country", clubSearchCountryInput.text }
+        };
+        switch (clubSearchMemberCountSortInput.value)
+        {
+            case 1:
+                searchParams.Add("memberCountSort", "desc");
+                break;
+            case 2:
+                searchParams.Add("memberCountSort", "asc");
+                break;
+        }
+
+        var searchClubsResponse =
+            await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "SearchClubs",
+                searchParams);
+        var myClubsResponse =
+            await CloudCodeService.Instance.CallModuleEndpointAsync<ClubsResponse>("ChessClubCloudCode", "ListMyClubs");
 
         var myClubIDs = myClubsResponse.Success ? myClubsResponse.Clubs.Select(c => c.ID).ToList() : new List<Guid>();
-        
+
         if (searchClubsResponse.Success)
         {
             searchClubsView.UpdateClubsView(searchClubsResponse.Clubs, myClubIDs, OpenClubPage);
@@ -340,12 +368,12 @@ public class Clubs : MonoBehaviour
             Debug.LogError(searchClubsResponse.StackTrace);
         }
     }
-    
+
     private async Task LoadClub(Guid id)
     {
         var clubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubResponse>("ChessClubCloudCode",
             "LoadClub", new Dictionary<string, object> { { "id", id } });
-        
+
         if (clubResponse.Success)
         {
             clubResponse.Club.MyStatus = clubResponse.MyStatus;
@@ -358,12 +386,13 @@ public class Clubs : MonoBehaviour
             Debug.LogError(clubResponse.StackTrace);
         }
     }
-    
+
     private async Task LoadClubJoinRequests()
     {
-        var clubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubJoinRequestsResponse>("ChessClubCloudCode",
+        var clubResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<ClubJoinRequestsResponse>(
+            "ChessClubCloudCode",
             "LoadClubJoinRequests", new Dictionary<string, object> { { "id", _activeClub.ID } });
-        
+
         if (clubResponse.Success)
         {
             JoinRequests = clubResponse.Requests;
@@ -374,10 +403,11 @@ public class Clubs : MonoBehaviour
             Debug.LogError(clubResponse.StackTrace);
         }
     }
-    
+
     private async Task KickMember(Guid clubId, string memberId)
     {
-        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>("ChessClubCloudCode", "KickClubMember",
+        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>(
+            "ChessClubCloudCode", "KickClubMember",
             new Dictionary<string, object> { { "clubId", clubId }, { "memberId", memberId } });
         if (!response.Success)
         {
@@ -397,7 +427,8 @@ public class Clubs : MonoBehaviour
 
     private async Task AdmitMember(Guid clubId, string memberId)
     {
-        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>("ChessClubCloudCode", "AdmitClubMember",
+        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>(
+            "ChessClubCloudCode", "AdmitClubMember",
             new Dictionary<string, object> { { "clubId", clubId }, { "memberId", memberId } });
         if (!response.Success)
         {
@@ -416,10 +447,11 @@ public class Clubs : MonoBehaviour
 
         JoinRequests = response.Requests;
     }
-    
+
     private async Task DenyMember(Guid clubId, string memberId)
     {
-        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>("ChessClubCloudCode", "DenyClubMember",
+        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<MemberManagementResponse>(
+            "ChessClubCloudCode", "DenyClubMember",
             new Dictionary<string, object> { { "clubId", clubId }, { "memberId", memberId } });
         if (!response.Success)
         {
@@ -435,7 +467,8 @@ public class Clubs : MonoBehaviour
 
     private async Task DeleteClub(Guid clubId)
     {
-        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<CloudCodeResponse>("ChessClubCloudCode", "DeleteClub",
+        var response = await CloudCodeService.Instance.CallModuleEndpointAsync<CloudCodeResponse>("ChessClubCloudCode",
+            "DeleteClub",
             new Dictionary<string, object> { { "id", clubId } });
         if (!response.Success)
         {
@@ -453,7 +486,20 @@ public class Clubs : MonoBehaviour
             _originCanvas.SetActive(true);
         }
     }
-    
+
+    public async void ApplySearchFilters()
+    {
+        await SearchClubs();
+    }
+
+    public async void ClearSearchFilters()
+    {
+        clubSearchNameInput.text = "";
+        clubSearchCountryInput.text = "";
+        clubSearchMemberCountSortInput.value = 0;
+        await SearchClubs();
+    }
+
     public async void LandingToMyClubs()
     {
         await ListMyClubs();
