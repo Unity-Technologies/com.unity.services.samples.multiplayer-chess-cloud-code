@@ -95,7 +95,7 @@ public class Player : MonoBehaviour
         {
             var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>("ChessCloudCode", "Resign",
                 new Dictionary<string, object> { { "session", _currentSession } });
-            OnMove(boardUpdate);
+            OnBoardUpdate(boardUpdate);
         }
         catch (LobbyServiceException exception)
         {
@@ -174,10 +174,10 @@ public class Player : MonoBehaviour
             });
 
         SelectPiece(null);
-        OnMove(result);
+        OnBoardUpdate(result);
     }
 
-    private async void OnMove(BoardUpdateResponse boardUpdateResponse)
+    private async void OnBoardUpdate(BoardUpdateResponse boardUpdateResponse)
     {
         SyncBoard(boardUpdateResponse.Board);
         if (boardUpdateResponse.GameOver)
@@ -211,7 +211,7 @@ public class Player : MonoBehaviour
             {
                 case "boardUpdated":
                     var message = JsonConvert.DeserializeObject<BoardUpdateResponse>(@event.Message);
-                    OnMove(message);
+                    OnBoardUpdate(message);
                     break;
                 case "opponentJoined":
                     var opponentJoinedMessage = JsonConvert.DeserializeObject<JoinGameResponse>(@event.Message);

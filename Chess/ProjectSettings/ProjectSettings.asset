@@ -748,10 +748,10 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 2
   windowsGamepadBackendHint: 0
-  cloudProjectId: aa783631-e8b8-46c6-9741-09566c8e26c2
+  cloudProjectId: 
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Souped Up Chess
+  projectName: 
   organizationId: live-ops-org
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0

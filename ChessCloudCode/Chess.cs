@@ -33,7 +33,6 @@ public class Chess
     {
         var lobbyResult = await _gameApiClient.Lobby.CreateLobbyAsync(context, context.AccessToken, null, null,
             new CreateRequest($"{context.PlayerId}'s game", 2, false, false, new Player(context.PlayerId)));
-        
         var chessBoard = new ChessBoard();
         await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
             lobbyResult.Data.Id,
