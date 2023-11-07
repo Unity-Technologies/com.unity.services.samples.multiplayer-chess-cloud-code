@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -8,27 +9,40 @@ using Unity.Services.Authentication;
 using Unity.Services.CloudCode;
 using Unity.Services.CloudCode.Subscriptions;
 using Unity.Services.Core;
+using Unity.Services.Leaderboards;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
+using UnityEngine.Analytics;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
+using UnityEngine.SocialPlatforms.Impl;
 using WebSocketSharp;
 
 public class Player : MonoBehaviour
 {
     private GameObject _selectedPiece;
     public Camera playerCamera;
+    public GameObject cameraPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
+    
     public TextMeshProUGUI playerNameText;
+    public TextMeshProUGUI playerEloText;
+    public TextMeshProUGUI opponentNameText;
+    public TextMeshProUGUI opponentEloText;
+
+    public GameObject resignButton;
     public GameObject uiPanel;
+    public TextMeshProUGUI resultText;
     public GameObject board;
     
     private readonly Dictionary<string, UnityEngine.Object> _prefabs = new();
-    private Lobby _currentLobby;
     private const string StartingBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     private bool _gameStarted;
+    private bool _isWhite;
+    private string _currentSession;
 
     private readonly Color32 _selectedColor = new (84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
@@ -38,42 +52,69 @@ public class Player : MonoBehaviour
     {
         await UnityServices.InitializeAsync();
         await AuthenticationService.Instance.SignInAnonymouslyAsync();
-        playerNameText.text = AuthenticationService.Instance.PlayerId;
         await SubscribeToPlayerMessages();
-        SyncBoard(FenToDict(StartingBoard));
+        SyncBoard(StartingBoard);
+        RefreshPlayerInfo();
+        resignButton.SetActive(false);
+    }
+
+    private async Task RefreshPlayerInfo()
+    {
+        var response = await LeaderboardsService.Instance.GetPlayerScoreAsync("EloRatings");
+        
+        playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
+        playerNameText.text = response.PlayerName;
+    }
+
+    private async Task SetOpponentInfo(string opponentId)
+    {
+        Debug.Log($"Setting opponent info");
+        var response = await LeaderboardsService.Instance.GetScoresByPlayerIdsAsync("EloRatings", new List<string>(){opponentId});
+        var opponent = response?.Results?.FirstOrDefault();
+        Debug.Log($"Setting opponent info {opponent?.PlayerId}");
+        opponentEloText.text = "Rating: " + Math.Round(opponent?.Score ?? 1500);
+        opponentNameText.text = opponent?.PlayerName ?? "Unknown";
     }
 
     public async void CreateGame()
     {
-        const int maxPlayers = 2;
-        var options = new CreateLobbyOptions
-        {
-            IsPrivate = false,
-            Player = new Unity.Services.Lobbies.Models.Player(
-                id: AuthenticationService.Instance.PlayerId,
-                data: new Dictionary<string, PlayerDataObject>()
-                {
-                    {
-                        "colour", new PlayerDataObject(
-                            visibility: PlayerDataObject.VisibilityOptions
-                                .Member, // Visible only to members of the lobby.
-                            value: "white")
-                    }
-                })
-        };
-        _currentLobby = await LobbyService.Instance.CreateLobbyAsync(lobbyCodeText.text, maxPlayers, options);
-        JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+        var hostGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>("ChessCloudCode", "HostGame");
+        
+        lobbyCodeText.text = hostGameResponse.LobbyCode;
     }
 
+    private void SetPov()
+    {
+        var angle = _isWhite ? 0 : 180;
+        cameraPivot.transform.eulerAngles = new Vector3(0, angle, 0);
+    }
+
+    public async void Resign()
+    {
+        try
+        {
+            var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>("ChessCloudCode", "Resign",
+                new Dictionary<string, object> { { "session", _currentSession } });
+            OnBoardUpdate(boardUpdate);
+        }
+        catch (LobbyServiceException exception)
+        {
+            Debug.LogException(exception);
+        }
+    }
+    
     public async void JoinLobbyByCode()
     {
         try
         {
             // There's a weird no space character that gets added to the end of the lobby code, let's remove it for now
             var sanitizedLobbyCode = Regex.Replace(lobbyInputCodeText.text, @"\s", "").Replace("\u200B", "");
-            _currentLobby = await LobbyService.Instance.JoinLobbyByCodeAsync(sanitizedLobbyCode);
-            lobbyCodeText.text = _currentLobby.LobbyCode;
-            JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
+            
+            var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
+                new Dictionary<string, object> { { "lobbyCode", sanitizedLobbyCode } });
+            lobbyCodeText.text = sanitizedLobbyCode;
+            
+            OnGameStart(joinGameResponse);
         }
         catch (LobbyServiceException exception)
         {
@@ -81,32 +122,9 @@ public class Player : MonoBehaviour
         }
     }
 
-    private async void JoinGame(string lobbyId, string lobbyCode)
+    private void SyncBoard(string fen)
     {
-        try
-        {
-            lobbyCodeText.text = lobbyCode;
-            var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
-                new Dictionary<string, object> { { "session", lobbyId } });
-            if (!joinGameResponse.Board.IsNullOrEmpty())
-            {
-                SyncBoard(FenToDict(joinGameResponse.Board));
-                uiPanel.SetActive(false);    
-            }
-            else
-            {
-                throw new Exception(joinGameResponse.Error);
-            }
-            _gameStarted = true;
-        }
-        catch (CloudCodeException exception)
-        {
-            Debug.LogException(exception);
-        }
-    }
-
-    private void SyncBoard(Dictionary<Tuple<int, int>, char> boardState)
-    {
+        var boardState = FenToDict(fen);
         try
         {
             foreach (Transform child in board.transform)
@@ -115,7 +133,6 @@ public class Player : MonoBehaviour
             }
             foreach (var piece in boardState)
             {
-                
                 var pieceType = char.ToLower(piece.Value) switch
                 {
                     'p' => "Pawn",
@@ -127,7 +144,7 @@ public class Player : MonoBehaviour
                     _ => ""
                 };
                 var prefabName = pieceType + (char.IsUpper(piece.Value) ? "Light" : "Dark");
-                if (!_prefabs.TryGetValue(prefabName, out var prefab))
+                if (!_prefabs.ContainsKey(prefabName))
                 {
                     _prefabs[prefabName] = Resources.Load($"{pieceType}/Prefabs/{prefabName}");    
                 }
@@ -146,20 +163,43 @@ public class Player : MonoBehaviour
     private async void MakeMove(GameObject piece, Vector3 toPos)
     {
         if (piece == null) return;
-        try
+        var result = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>(
+            "ChessCloudCode", 
+            "MakeMove",
+            new Dictionary<string, object>
+            {
+                { "session", _currentSession }, 
+                { "fromPosition", PosToFen(piece.transform.position) },
+                { "toPosition", PosToFen(toPos) }
+            });
+
+        SelectPiece(null);
+        OnBoardUpdate(result);
+    }
+
+    private async void OnBoardUpdate(BoardUpdateResponse boardUpdateResponse)
+    {
+        SyncBoard(boardUpdateResponse.Board);
+        if (boardUpdateResponse.GameOver)
         {
-            var result = await CloudCodeService.Instance.CallModuleEndpointAsync("ChessCloudCode", "MakeMove",
-                new Dictionary<string, object>
-                    { { "session", _currentLobby.Id }, { "fromPosition", PosToFen(piece.transform.position) }, { "toPosition", PosToFen(toPos) } });
-            Debug.Log(result);
-            SelectPiece(null);
-            var response = JsonConvert.DeserializeObject<Dictionary<string, string>>(result);
-            SyncBoard(FenToDict(response["board"]));
+            uiPanel.SetActive(true);
+            resignButton.SetActive(false);
+            resultText.text = boardUpdateResponse.EndgameType;
+            RefreshPlayerInfo();
         }
-        catch (CloudCodeException exception)
-        {
-            Debug.LogException(exception);
-        }
+    }
+
+    private async void OnGameStart(JoinGameResponse joinGameResponse)
+    {
+        Debug.Log($"Opponent joined: {joinGameResponse.OpponentId}");
+        _currentSession = joinGameResponse.Session;
+        SetOpponentInfo(joinGameResponse.OpponentId);
+        SyncBoard(joinGameResponse.Board);
+        uiPanel.SetActive(false);
+        resignButton.SetActive(true);
+        _isWhite = joinGameResponse.IsWhite;
+        SetPov();
+        _gameStarted = true;
     }
 
     private Task SubscribeToPlayerMessages()
@@ -170,16 +210,13 @@ public class Player : MonoBehaviour
             switch (@event.MessageType)
             {
                 case "boardUpdated":
-                {
-                    var message = JsonConvert.DeserializeObject<Dictionary<string, string>>(@event.Message);
-                    SyncBoard(FenToDict(message["board"]));
+                    var message = JsonConvert.DeserializeObject<BoardUpdateResponse>(@event.Message);
+                    OnBoardUpdate(message);
                     break;
-                }
-                case "clearBoard":
-                {
-                    SyncBoard(FenToDict(StartingBoard));
+                case "opponentJoined":
+                    var opponentJoinedMessage = JsonConvert.DeserializeObject<JoinGameResponse>(@event.Message);
+                    OnGameStart(opponentJoinedMessage);
                     break;
-                }
                 default:
                     Debug.Log($"Got unsupported player Message: {JsonConvert.SerializeObject(@event, Formatting.Indented)}");
                     break;
@@ -187,9 +224,8 @@ public class Player : MonoBehaviour
         };
         callbacks.ConnectionStateChanged += @event =>
         {
-            if (@event == EventConnectionState.Subscribed && _currentLobby != null && _gameStarted)
+            if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted)
             {
-                JoinGame(_currentLobby.Id, _currentLobby.LobbyCode);
             }
             Debug.Log($"Got player subscription ConnectionStateChanged: {@event.ToString()}");
         };
@@ -206,18 +242,19 @@ public class Player : MonoBehaviour
 
     public void PlayerInteract(InputAction.CallbackContext context)
     {
-        if (!context.performed && _currentLobby != null) return;
+        if (!context.performed && _currentSession != null) return;
         var mousePosition = Mouse.current.position.ReadValue();
         var rayOrigin = playerCamera.ScreenPointToRay(mousePosition);
         if (Physics.Raycast(rayOrigin, out var hitInfo))
         {
-            // TODO: check if a piece is selected and another piece is clicked - is that a move?
-            if (hitInfo.transform.gameObject.name == "Board")
+            var gameObject = hitInfo.transform.gameObject;
+            if (hitInfo.transform.gameObject.name == "Board"
+                || (_selectedPiece != null && gameObject.name.Contains("Light") != _isWhite))
             {
                 var boardPos = new Vector3(Mathf.RoundToInt(hitInfo.point.x), 0, Mathf.RoundToInt(hitInfo.point.z));
                 MakeMove(_selectedPiece, boardPos);
             }
-            else
+            else if (gameObject.name.Contains("Light") == _isWhite)
             {
                 SelectPiece(hitInfo.transform.gameObject);
                 Debug.Log($"Piece selected: {_selectedPiece.name}");    
@@ -279,10 +316,24 @@ public class Player : MonoBehaviour
         selectedRenderer.material.color = newColor;
     }
     
-    private class JoinGameResponse
+    public class HostGameResponse
+    {
+        public string LobbyCode { get; set; }
+    }    
+    
+    public class BoardUpdateResponse
     {
         public string Board { get; set; }
-        public string Error { get; set; }
+        public bool GameOver { get; set; }
+        public string EndgameType { get; set; }
+    }
+
+    public class JoinGameResponse
+    {        
+        public string Session { get; set; }
+        public string Board { get; set; }
+        public string OpponentId { get; set; }
+        public bool IsWhite { get; set; }
     }
 
     private string PosToFen(Vector3 pos)
