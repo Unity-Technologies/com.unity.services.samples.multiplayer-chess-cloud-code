@@ -6,7 +6,7 @@ A sample project that demonstrates how to implement a server authoritative async
 
 To run the chess sample, import the Chess folder as a Unity project, open and run the `ChessDemo.unity` scene.
 
-For this sample to work, you first need to publish your Cloud Code module and Leaderboard via the Deployment Window.
+For this sample to work, you first need to publish your Cloud Code Module and Leaderboard via the Deployment Window.
 
 To access the Deployment window:
 - In 2021 or before, use `Window > Deployment`.
@@ -17,6 +17,16 @@ Then click on `Deploy All` to deploy both `ChessCloudCode.ccmr` and `EloRatings.
 To run another game client locally to play against, go to `File -> Build and Run`. Then you can create a game in one client, and join it in the other using the generated code shown in the top right of the game window.
 
 To limit access to specific Cloud Code endpoints from authenticated players (i.e. the game client), have a look at the [Access Control](https://docs.unity.com/ugs-overview/en/manual/access-control) documentation.
+
+### .NET Requirement
+
+To deploy Cloud Code Modules in the editor you must first install .NET.
+
+Follow the steps below to set your default .NET path in editor:
+
+1. In the Unity Editor, select `Edit > Preferences… > Cloud Code`.
+2. In the .`NET development environment` section, modify your `.NET path` to the one you have it installed.
+3. Select `Apply`.
 
 ### Alternative Setup
 
