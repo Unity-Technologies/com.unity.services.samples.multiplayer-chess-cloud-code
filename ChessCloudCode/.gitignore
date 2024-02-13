@@ -43,5 +43,6 @@ crashlytics-build.properties
 
 # Cloud Code C# Modules
 *.ccm
+/module-compilation/
 
 .idea/

@@ -61,6 +61,5 @@ crashlytics-build.properties
 
 # Cloud Code C# Modules
 *.ccm
-Assets/Setup/ChessCloudCode~/module-compilation/
 
 .idea/
