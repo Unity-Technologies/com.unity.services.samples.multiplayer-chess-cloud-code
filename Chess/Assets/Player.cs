@@ -10,6 +10,7 @@ using Unity.Services.CloudCode;
 using Unity.Services.CloudCode.Subscriptions;
 using Unity.Services.Core;
 using Unity.Services.Leaderboards;
+using Unity.Services.Leaderboards.Exceptions;
 using Unity.Services.Lobbies;
 using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
@@ -54,8 +55,30 @@ public class Player : MonoBehaviour
         await AuthenticationService.Instance.SignInAnonymouslyAsync();
         await SubscribeToPlayerMessages();
         SyncBoard(StartingBoard);
-        RefreshPlayerInfo();
+        InitializePlayer();
         resignButton.SetActive(false);
+    }
+    
+    private async Task InitializePlayer()
+    {
+        try
+        {
+            await RefreshPlayerInfo();
+        }
+        catch (LeaderboardsException e)
+        {
+            // If player is not present on lb create a new entry for them
+            if (e.Reason == LeaderboardsExceptionReason.EntryNotFound)
+            {
+                var response = await LeaderboardsService.Instance.AddPlayerScoreAsync("EloRatings", 1500);
+                playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
+                playerNameText.text = response.PlayerName;
+            }
+            else
+            {
+                throw;
+            }
+        }
     }
 
     private async Task RefreshPlayerInfo()
