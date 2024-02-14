@@ -35,7 +35,7 @@ Alternatively to using the Deployment Window, you can publish your Cloud Code mo
 Once the CLI is set up, the module and leaderboard can be deployed with the following commands (or by running the `deploy.sh` script):
 
 ```
-ugs deploy Chess/Assets/Setup/ChessCloudCode~/ChessCloudCode.sln --services cloud-code-modules
+ugs deploy ChessCloudCode/ChessCloudCode.sln --services cloud-code-modules
 ugs deploy Chess/Assets/Setup/EloRatings.lb --services leaderboards
 ```
 
