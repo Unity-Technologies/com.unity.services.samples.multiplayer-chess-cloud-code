@@ -1,0 +1,14 @@
+- Users need to create an SA as well, we should document that
+  - The SA need a bunch of specific permissions
+
+
+- We need to use the MatchId config type for MM, but creating it is not suppoerted on uDash
+  - uDash does seem to support display for the queuetype, but it says "Relay" which is not necessarily true
+
+
+- We can create that MM queue type via UGS CLI, though it's not documented
+  - It wants to list fleets anyway even if we don't use them, SA requires that permission
+
+
+- The session concept could be implemented in a Session microservice instead of in an SDK, making it available to all (non-MWU, Cloud Code, etc) and allowing us to change behavior without shipping a new SDK
+  - The client facing interface on the SDK can stay the same

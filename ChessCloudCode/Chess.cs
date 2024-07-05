@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using System.Formats.Asn1;
+using Newtonsoft.Json;
 using Unity.Services.CloudCode.Apis;
 using Unity.Services.CloudCode.Core;
 using Unity.Services.CloudSave.Model;
@@ -6,6 +7,8 @@ using Chess;
 using Microsoft.Extensions.Logging;
 using Unity.Services.Leaderboards.Model;
 using Unity.Services.Lobby.Model;
+using Unity.Services.Matchmaker.Model;
+using Player = Unity.Services.Lobby.Model.Player;
 
 namespace ChessCloudCode;
 
@@ -14,6 +17,11 @@ public class Chess
     private const string LeaderboardId = "EloRatings";
     private const int KValue = 30;
     private const int StartingElo = 1500;
+    private enum MatchState
+    {
+        InProgress,
+        Ended
+    }
     
     private readonly IGameApiClient _gameApiClient;
     private readonly IPushClient _pushClient;
@@ -28,6 +36,54 @@ public class Chess
         _rng = rng;
     }
 
+    [CloudCodeFunction("InitializeMatch")]
+    public async Task InitializeMatch(IExecutionContext context, string matchId)
+    {
+        var matchmakingResults = await GetMatchmakingResults(context, matchId);
+        if (matchmakingResults == null)
+        {
+            throw new Exception("Matchmaking results not found");
+        }
+        
+        var players = matchmakingResults?.MatchProperties.Players;
+        if (players == null || players.Count != 2)
+        {
+            throw new Exception("Matchmaking results do not contain two players");
+        }
+        
+        var chessBoard = new ChessBoard();
+        await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
+            matchId,
+            new SetItemBatchBody(new List<SetItemBody>(){ 
+                new("board", chessBoard.ToFen()),
+                new("whitePlayerId", players[0].Id),
+                new("blackPlayerId", players[1].Id),
+                new("turnCounter", 1),
+                new("matchState", MatchState.InProgress.ToString())
+            }));
+        
+        Parallel.ForEach(players, async player =>
+        {
+            await _gameApiClient.CloudSaveData.SetItemAsync(context, context.ServiceToken, context.ProjectId,
+                player.Id,
+                new SetItemBody("currentMatchId", matchId));
+        });
+    }
+
+    // TODO replace this by a proper call to the generated Matchmaker SDK once an OpenAPI spec is available that supports MatchmakingResults
+    private async Task<MatchmakingResults?> GetMatchmakingResults(IExecutionContext context, string matchId)
+    {
+        var client = new HttpClient();
+        var url =
+            $"https://matchmaker.services.api.unity.com/v2alpha1/projects/{context.ProjectId}/matches/{matchId}/matchmaking-results";
+        
+        var response = await client.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        var content = await response.Content.ReadAsStringAsync();
+        
+        return JsonConvert.DeserializeObject<MatchmakingResults>(content);
+    }
+        
     [CloudCodeFunction("HostGame")]
     public async Task<HostGameResponse> HostGame(IExecutionContext context)
     {
@@ -46,7 +102,7 @@ public class Chess
             LobbyCode = lobbyResult.Data.LobbyCode,
         };
     }
-
+    
     [CloudCodeFunction("JoinGame")]
     public async Task<JoinGameResponse> JoinGame(IExecutionContext context, string lobbyCode)
     {

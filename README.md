@@ -13,6 +13,8 @@ The game utilizes a wide range of UGS products and services to implement the fol
 
 ## Setup
 
+**_TODO: do we need to explain how to create a Service Account and which permissions to give it?_**
+
 To run the chess sample, import the Chess folder as a Unity project, open and run the `ChessDemo.unity` scene.
 
 For this sample to work, you first need to publish your Cloud Code Module and Leaderboard via the Deployment Window.

@@ -12,22 +12,17 @@ using Unity.Services.Core;
 using Unity.Services.Leaderboards;
 using Unity.Services.Leaderboards.Exceptions;
 using Unity.Services.Lobbies;
-using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
-using UnityEngine.Analytics;
 using UnityEngine.InputSystem;
-using UnityEngine.Serialization;
-using UnityEngine.SocialPlatforms.Impl;
-using WebSocketSharp;
 
 public class Player : MonoBehaviour
 {
     private GameObject _selectedPiece;
     public Camera playerCamera;
     public GameObject cameraPivot;
-    public TextMeshProUGUI lobbyInputCodeText;
-    public TextMeshProUGUI lobbyCodeText;
+    public TextMeshProUGUI joinCodeInput;
+    public TextMeshProUGUI joinCodeDisplayText;
     
     public TextMeshProUGUI playerNameText;
     public TextMeshProUGUI playerEloText;
@@ -103,7 +98,7 @@ public class Player : MonoBehaviour
     {
         var hostGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>("ChessCloudCode", "HostGame");
         
-        lobbyCodeText.text = hostGameResponse.LobbyCode;
+        joinCodeDisplayText.text = hostGameResponse.LobbyCode;
     }
 
     private void SetPov()
@@ -131,11 +126,11 @@ public class Player : MonoBehaviour
         try
         {
             // There's a weird no space character that gets added to the end of the lobby code, let's remove it for now
-            var sanitizedLobbyCode = Regex.Replace(lobbyInputCodeText.text, @"\s", "").Replace("\u200B", "");
+            var sanitizedLobbyCode = Regex.Replace(joinCodeInput.text, @"\s", "").Replace("\u200B", "");
             
             var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
                 new Dictionary<string, object> { { "lobbyCode", sanitizedLobbyCode } });
-            lobbyCodeText.text = sanitizedLobbyCode;
+            joinCodeDisplayText.text = sanitizedLobbyCode;
             
             OnGameStart(joinGameResponse);
         }
