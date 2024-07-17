@@ -1,4 +1,5 @@
 ﻿using System.Formats.Asn1;
+using System.Net;
 using Newtonsoft.Json;
 using Unity.Services.CloudCode.Apis;
 using Unity.Services.CloudCode.Core;
@@ -17,12 +18,13 @@ public class Chess
     private const string LeaderboardId = "EloRatings";
     private const int KValue = 30;
     private const int StartingElo = 1500;
+
     private enum MatchState
     {
         InProgress,
         Ended
     }
-    
+
     private readonly IGameApiClient _gameApiClient;
     private readonly IPushClient _pushClient;
     private readonly ILogger<Chess> _logger;
@@ -36,54 +38,72 @@ public class Chess
         _rng = rng;
     }
 
+    // TODO break out shared logic and evaluate whether to have one method for
+    // All match join logic or multiple methods for join via lobby code and matchmaker
     [CloudCodeFunction("InitializeMatch")]
-    public async Task InitializeMatch(IExecutionContext context, string matchId)
+    public async Task<InitializeMatchResponse> InitializeMatch(IExecutionContext context, string sessionId)
     {
-        var matchmakingResults = await GetMatchmakingResults(context, matchId);
+        //var matchmakingResults = await GetMatchmakingResults(context, sessionId);
+        var matchmakingResults =
+            await _gameApiClient.MatchmakerMatches.GetMatchmakingResultsAsync(context, context.ServiceToken, sessionId,
+                context.ProjectId);
         if (matchmakingResults == null)
         {
-            throw new Exception("Matchmaking results not found");
+            return new InitializeMatchResponse() { Status = "Matchmaking results not found" };
         }
-        
-        var players = matchmakingResults?.MatchProperties.Players;
-        if (players == null || players.Count != 2)
+
+        var players = matchmakingResults.Data.MatchProperties.Players;
+        if (players.Count != 2)
         {
-            throw new Exception("Matchmaking results do not contain two players");
+            return new InitializeMatchResponse() { Status = "Matchmaking results do not contain two players" };
         }
-        
+
         var chessBoard = new ChessBoard();
-        await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
-            matchId,
-            new SetItemBatchBody(new List<SetItemBody>(){ 
+        var csResponse = await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken,
+            context.ProjectId,
+            sessionId,
+            new SetItemBatchBody(new List<SetItemBody>()
+            {
                 new("board", chessBoard.ToFen()),
                 new("whitePlayerId", players[0].Id),
                 new("blackPlayerId", players[1].Id),
                 new("turnCounter", 1),
-                new("matchState", MatchState.InProgress.ToString())
+                new("matchState", MatchState.InProgress.ToString()),
+                new("createdAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
+                new("updatedAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds())
             }));
+
+        if (csResponse.StatusCode != HttpStatusCode.OK)
+        {
+            return new InitializeMatchResponse()
+                { Status = $"Error creating match state in Cloud Save\nError: {csResponse.ErrorText}" };
+        }
+
+        List<string> errors = new List<string>();
         
         Parallel.ForEach(players, async player =>
         {
-            await _gameApiClient.CloudSaveData.SetItemAsync(context, context.ServiceToken, context.ProjectId,
+            var csPlayerResponse = await _gameApiClient.CloudSaveData.SetItemAsync(context, context.ServiceToken,
+                context.ProjectId,
                 player.Id,
-                new SetItemBody("currentMatchId", matchId));
+                new SetItemBody("currentMatchId", sessionId));
+
+            if (csPlayerResponse.StatusCode != HttpStatusCode.OK)
+            {
+                errors.Add(csPlayerResponse.ErrorText);
+            }
         });
+
+        if (errors.Count > 0)
+        {
+            return new InitializeMatchResponse()
+                { Status = $"Error setting player state\nErrors: {String.Join("\n", errors)}" };
+        }
+
+        return new InitializeMatchResponse() { Status = "OK" };
     }
 
-    // TODO replace this by a proper call to the generated Matchmaker SDK once an OpenAPI spec is available that supports MatchmakingResults
-    private async Task<MatchmakingResults?> GetMatchmakingResults(IExecutionContext context, string matchId)
-    {
-        var client = new HttpClient();
-        var url =
-            $"https://matchmaker.services.api.unity.com/v2alpha1/projects/{context.ProjectId}/matches/{matchId}/matchmaking-results";
-        
-        var response = await client.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        var content = await response.Content.ReadAsStringAsync();
-        
-        return JsonConvert.DeserializeObject<MatchmakingResults>(content);
-    }
-        
+    // TODO rename
     [CloudCodeFunction("HostGame")]
     public async Task<HostGameResponse> HostGame(IExecutionContext context)
     {
@@ -92,7 +112,8 @@ public class Chess
         var chessBoard = new ChessBoard();
         await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken, context.ProjectId,
             lobbyResult.Data.Id,
-            new SetItemBatchBody(new List<SetItemBody>(){ 
+            new SetItemBatchBody(new List<SetItemBody>()
+            {
                 new("board", chessBoard.ToFen()),
                 new("whitePlayerId", context.PlayerId)
             }));
@@ -102,7 +123,7 @@ public class Chess
             LobbyCode = lobbyResult.Data.LobbyCode,
         };
     }
-    
+
     [CloudCodeFunction("JoinGame")]
     public async Task<JoinGameResponse> JoinGame(IExecutionContext context, string lobbyCode)
     {
@@ -116,7 +137,8 @@ public class Chess
         {
             _logger.LogError($"{e.Message} | {e.GetType().Name}");
             var lobbyIds = _gameApiClient.Lobby.GetJoinedLobbiesAsync(context, context.AccessToken);
-            var lobbyResponse = await _gameApiClient.Lobby.GetLobbyAsync(context, context.AccessToken, lobbyIds.Result.Data.First());
+            var lobbyResponse =
+                await _gameApiClient.Lobby.GetLobbyAsync(context, context.AccessToken, lobbyIds.Result.Data.First());
             return await Rejoin(context, lobbyResponse.Data);
         }
     }
@@ -165,22 +187,24 @@ public class Chess
                 lobby.Id, new List<string> { "board", "whitePlayerId", "blackPlayerId" });
 
         var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
-        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);;
+        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);
+        ;
         var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
-        
+
         var playerIsWhite = whitePlayer == context.PlayerId;
-        
+
         return new JoinGameResponse()
         {
             Session = lobby.Id,
             Board = chessBoard.ToFen(),
             OpponentId = opponentId,
-            IsWhite = playerIsWhite 
+            IsWhite = playerIsWhite
         };
     }
 
     [CloudCodeFunction("MakeMove")]
-    public async Task<BoardUpdateResponse> MakeMove(IExecutionContext context, string session, string fromPosition, string toPosition)
+    public async Task<BoardUpdateResponse> MakeMove(IExecutionContext context, string session, string fromPosition,
+        string toPosition)
     {
         var saveResponse =
             await _gameApiClient.CloudSaveData.GetCustomItemsAsync(context, context.ServiceToken, context.ProjectId,
@@ -189,16 +213,16 @@ public class Chess
         var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
         var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
         var blackPlayer = saveResponse.Data.Results.Find(r => r.Key == "blackPlayerId").Value.ToString();
-        
+
         var playerIsWhite = whitePlayer == context.PlayerId;
 
         var playerColour = context.PlayerId switch
         {
-            var value when value == whitePlayer => PieceColor.White,                
+            var value when value == whitePlayer => PieceColor.White,
             var value when value == blackPlayer => PieceColor.Black,
             _ => throw new Exception("Player is not in the game")
         };
-        
+
         // Check if it is the moving player's turn
         if (chessBoard.Turn != playerColour)
         {
@@ -211,7 +235,7 @@ public class Chess
         {
             throw new Exception($"Invalid move from {fromPosition} to {toPosition}");
         }
-        
+
         // Make the move
         chessBoard.Move(new Move(fromPosition, toPosition));
 
@@ -221,7 +245,7 @@ public class Chess
             new SetItemBody("board", chessBoard.ToFen()));
 
         var opponentId = playerIsWhite ? blackPlayer : whitePlayer;
-            
+
         if (chessBoard.IsEndGame)
         {
             var playerScore = playerColour == chessBoard.EndGame.WonSide ? 1 :
@@ -231,14 +255,15 @@ public class Chess
                 opponentId,
                 playerScore);
         }
-        
+
         var boardUpdatedResponse = new BoardUpdateResponse
         {
-            Board = chessBoard.ToFen(), 
-            GameOver = chessBoard.IsEndGame, 
+            Board = chessBoard.ToFen(),
+            GameOver = chessBoard.IsEndGame,
             EndgameType = chessBoard.EndGame?.EndgameType.ToString()
         };
-        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
+        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse),
+            "boardUpdated",
             opponentId);
         return boardUpdatedResponse;
     }
@@ -247,11 +272,11 @@ public class Chess
     {
         var projectId = Guid.Parse(context.ProjectId);
         var elos = await _gameApiClient.Leaderboards.GetLeaderboardScoresByPlayerIdsAsync(context, context.ServiceToken,
-            projectId, LeaderboardId,
-            new LeaderboardPlayerIds(new List<string>() {context.PlayerId, opponentId}));
+            projectId, LeaderboardId, false,
+            new LeaderboardPlayerIds(new List<string>() { context.PlayerId, opponentId }));
         var playerElo = elos.Data?.Results?.Find(r => r.PlayerId == context.PlayerId)?.Score ?? StartingElo;
         var opponentElo = elos.Data?.Results?.Find(r => r.PlayerId == opponentId)?.Score ?? StartingElo;
-        
+
         var expectedScore = 1 / (1 + Math.Pow(10, (opponentElo - playerElo) / 400));
         var eloChange = KValue * (playerScore - expectedScore);
         var playerNewElo = playerElo + eloChange;
@@ -260,10 +285,12 @@ public class Chess
         _logger.LogInformation($"Updating {opponentId}'s Elo from {opponentElo} to {opponentNewElo}");
         var tasks = new Task[]
         {
-            _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId, LeaderboardId,
-                context.PlayerId, new LeaderboardScore(playerNewElo)),
-            _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId, LeaderboardId,
-                opponentId, new LeaderboardScore(opponentNewElo))
+            _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId,
+                LeaderboardId,
+                context.PlayerId, new AddLeaderboardScore(playerNewElo)),
+            _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context, context.ServiceToken, projectId,
+                LeaderboardId,
+                opponentId, new AddLeaderboardScore(opponentNewElo))
         };
         await Task.WhenAll(tasks);
     }
@@ -281,17 +308,17 @@ public class Chess
 
         var playerColour = context.PlayerId switch
         {
-            var value when value == whitePlayer => PieceColor.White,                
+            var value when value == whitePlayer => PieceColor.White,
             var value when value == blackPlayer => PieceColor.Black,
             _ => throw new Exception("Player is not in the game")
         };
-        
+
         chessBoard.Resign(playerColour);
-        
+
         await _gameApiClient.CloudSaveData.SetCustomItemAsync(context, context.ServiceToken, context.ProjectId,
             session,
             new SetItemBody("board", chessBoard.ToFen()));
-        
+
         var playerIsWhite = whitePlayer == context.PlayerId;
         var opponentId = playerIsWhite ? blackPlayer : whitePlayer;
         var playerScore = playerColour == chessBoard.EndGame.WonSide ? 1 :
@@ -300,14 +327,15 @@ public class Chess
             context,
             opponentId,
             playerScore);
-        
+
         var boardUpdatedResponse = new BoardUpdateResponse
         {
-            Board = chessBoard.ToFen(), 
-            GameOver = chessBoard.IsEndGame, 
+            Board = chessBoard.ToFen(),
+            GameOver = chessBoard.IsEndGame,
             EndgameType = chessBoard.EndGame?.EndgameType.ToString()
         };
-        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse), "boardUpdated",
+        await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse),
+            "boardUpdated",
             opponentId);
         return boardUpdatedResponse;
     }
@@ -319,11 +347,16 @@ public class HostGameResponse
 }
 
 public class JoinGameResponse
-{    
+{
     public string Session { get; set; }
     public string Board { get; set; }
     public string OpponentId { get; set; }
     public bool IsWhite { get; set; }
+}
+
+public class InitializeMatchResponse
+{
+    public string Status;
 }
 
 public class BoardUpdateResponse

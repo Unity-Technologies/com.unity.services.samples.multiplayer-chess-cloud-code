@@ -711,7 +711,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 1881174974}
         m_TargetAssemblyTypeName: Player, Assembly-CSharp
-        m_MethodName: CreateGame
+        m_MethodName: FindMatch
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -1747,6 +1747,50 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 449874633}
   m_Mesh: {fileID: 4300000, guid: 0d4dc18442ed9d14698239a5a964f27f, type: 3}
+--- !u!1 &519999539
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 519999541}
+  - component: {fileID: 519999540}
+  m_Layer: 0
+  m_Name: MatchManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &519999540
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519999539}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 91ab04a1e4af4bffb3908fe5fe47d74e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!4 &519999541
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519999539}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3.4999995, y: 0.5846951, z: 3.5000005}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &631113151 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 1857998089916902, guid: 5b856ec4f8f8cb84f861f8f8a026c288, type: 3}
@@ -5641,7 +5685,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1881174973}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: abdabbe5de74490b82c022f059e7063c, type: 3}
+  m_Script: {fileID: 11500000, guid: 91ab04a1e4af4bffb3908fe5fe47d74e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
 --- !u!1 &1941642356
@@ -6892,3 +6936,4 @@ SceneRoots:
   - {fileID: 1881174975}
   - {fileID: 908034760}
   - {fileID: 1835524142}
+  - {fileID: 519999541}
