@@ -49,12 +49,11 @@ public static class MatchLoader
     private static Match MapToMatch(Dictionary<string, Item> data)
     {
         return new Match(
-            data["board"].Value.ToString(),
-            data["whitePlayerId"].Value.ToString(),
-            data["blackPlayerId"].Value.ToString(),
-            Convert.ToInt32(data["turnCounter"].Value),
-            data["matchState"].Value.ToString(),
-            Convert.ToInt64(data["matchCreatedAt"].Value)
+            data["board"].Value.GetAsString(),
+            data["whitePlayerId"].Value.GetAsString(),
+            data["blackPlayerId"].Value.GetAsString(),
+            data["turnCounter"].Value.GetAs<int>(),
+            data["matchState"].Value.GetAsString()
         );
     }
 }

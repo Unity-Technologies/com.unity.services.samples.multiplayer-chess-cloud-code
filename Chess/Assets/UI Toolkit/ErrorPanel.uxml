@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/UI%20Toolkit/chess.uss?fileID=7433441132597879392&amp;guid=f106120d295724f5f913107d3dcb86a8&amp;type=3#chess" />
+    <ui:VisualElement name="Root" class="root-panel">
+        <ui:VisualElement name="ErrorPanel" class="error-panel base-panel">
+            <ui:Label tabindex="-1" text="- Error Text Goes Here -" parse-escape-sequences="true" display-tooltip-when-elided="true" name="ErrorText" class="error-text" />
+            <ui:Button text="OK" parse-escape-sequences="true" display-tooltip-when-elided="true" name="OkButton" class="ok-button" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using DefaultNamespace;
 using Newtonsoft.Json;
 using TMPro;
 using Unity.Services.Authentication;
@@ -32,6 +33,7 @@ public class Player : MonoBehaviour
     public TextMeshProUGUI playerEloText;
     public TextMeshProUGUI opponentNameText;
     public TextMeshProUGUI opponentEloText;
+    public TextMeshProUGUI errorText;
 
     public GameObject resignButton;
     public GameObject uiPanel;
@@ -44,9 +46,8 @@ public class Player : MonoBehaviour
 
     private readonly Dictionary<string, UnityEngine.Object> _prefabs = new();
     private const string StartingBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    private bool _gameStarted;
+    public GameState GameState;
     private bool _isWhite;
-    private string _currentSession;
 
     private readonly Color32 _selectedColor = new(84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
@@ -56,32 +57,38 @@ public class Player : MonoBehaviour
     {
         await UnityServices.InitializeAsync();
         await AuthenticationService.Instance.SignInAnonymouslyAsync();
-        // await SubscribeToPlayerMessages();
         SyncBoard(StartingBoard);
-        InitializePlayer();
+        
+        // TODO Check for existing match
+        // lookup match on player
+        //  if match then join or create session
+        // else
+        //   Main menu
+        
+        GameState = new GameState();
         _chessCloudCodeBindings = new ChessCloudCodeBindings(CloudCodeService.Instance);
         resignButton.SetActive(false);
+        Events.current.errorAcknowledgedEvent.AddListener(HandleErrorAck);
+        await InitializePlayer();
+    }
+
+    private void HandleErrorAck()
+    {
+        GameState.SetGamePhase(GamePhase.MainMenu);
     }
 
     private async Task InitializePlayer()
     {
         try
         {
-            await RefreshPlayerInfo();
+            var playerData = await _chessCloudCodeBindings.PrepareAndFetchPlayerData();
+            playerEloText.text = $"Rating: {playerData.EloScore}";
+            playerNameText.text = $"{playerData.Name}";
         }
-        catch (LeaderboardsException e)
+        catch (Exception e)
         {
-            // If player is not present on lb create a new entry for them
-            if (e.Reason == LeaderboardsExceptionReason.EntryNotFound)
-            {
-                var response = await LeaderboardsService.Instance.AddPlayerScoreAsync("EloRatings", 1500);
-                playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
-                playerNameText.text = response.PlayerName;
-            }
-            else
-            {
-                throw;
-            }
+            GameState.SetGamePhase(GamePhase.Error, "Unable to get player data, please try again");
+            Debug.LogError(e.Message);
         }
     }
 
@@ -125,7 +132,7 @@ public class Player : MonoBehaviour
         {
             var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>(
                 "ChessCloudCode", "Resign",
-                new Dictionary<string, object> { { "session", _currentSession } });
+                new Dictionary<string, object> { { "session", Session.Id } });
             OnBoardUpdate(boardUpdate);
         }
         catch (LobbyServiceException exception)
@@ -201,7 +208,7 @@ public class Player : MonoBehaviour
             "MakeMove",
             new Dictionary<string, object>
             {
-                { "session", _currentSession },
+                { "session", Session.Id },
                 { "fromPosition", PosToFen(piece.transform.position) },
                 { "toPosition", PosToFen(toPos) }
             });
@@ -218,21 +225,17 @@ public class Player : MonoBehaviour
             uiPanel.SetActive(true);
             resignButton.SetActive(false);
             resultText.text = boardUpdateResponse.EndgameType;
-            RefreshPlayerInfo();
+            await RefreshPlayerInfo();
         }
     }
 
     private async void OnGameStart(JoinGameResponse joinGameResponse)
     {
         Debug.Log($"Opponent joined: {joinGameResponse.OpponentId}");
-        _currentSession = joinGameResponse.Session;
-        SetOpponentInfo(joinGameResponse.OpponentId);
-        SyncBoard(joinGameResponse.Board);
         uiPanel.SetActive(false);
         resignButton.SetActive(true);
-        _isWhite = joinGameResponse.IsWhite;
         SetPov();
-        _gameStarted = true;
+        GameState.SetGamePhase(GamePhase.InMatch);
     }
 
     private Task SubscribeToPlayerMessages()
@@ -258,7 +261,7 @@ public class Player : MonoBehaviour
         };
         callbacks.ConnectionStateChanged += @event =>
         {
-            if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted)
+            if (@event == EventConnectionState.Subscribed && Session != null && GameState.GamePhase == GamePhase.InMatch)
             {
             }
 
@@ -274,7 +277,7 @@ public class Player : MonoBehaviour
 
     public void PlayerInteract(InputAction.CallbackContext context)
     {
-        if (!context.performed && _currentSession != null) return;
+        if (!context.performed && Session != null) return;
         var mousePosition = Mouse.current.position.ReadValue();
         var rayOrigin = playerCamera.ScreenPointToRay(mousePosition);
         if (Physics.Raycast(rayOrigin, out var hitInfo))
@@ -346,78 +349,149 @@ public class Player : MonoBehaviour
 
     public async void FindMatch()
     {
-        var matchmakerOptions = new MatchmakerOptions
+        if (GameState.GamePhase != GamePhase.MainMenu)
         {
-            QueueName = "default-queue"
-        };
-
-        var sessionOptions = new SessionOptions()
+            // TODO set error, raise exception;
+            GameState.SetGamePhase(GamePhase.Error,
+                "Unable to create match, matches can only be created from the main menu");
+            Debug.Log("Unable to create match, matches can only be created from the main menu");
+        }
+        else
         {
-            MaxPlayers = 2,
-            IsPrivate = true
-        };
+            var matchmakerOptions = new MatchmakerOptions
+            {
+                QueueName = "default-queue"
+            };
 
-        var matchmakerCancellationSource = new CancellationTokenSource();
+            var sessionOptions = new SessionOptions()
+            {
+                MaxPlayers = 2,
+                IsPrivate = true
+            };
 
-        Session = await MultiplayerService.Instance.MatchmakeSessionAsync(matchmakerOptions, sessionOptions,
-            matchmakerCancellationSource.Token);
-        Session.Changed += OnSessionChanged;
+            var matchmakerCancellationSource = new CancellationTokenSource();
+
+            Debug.Log("Finding Match");
+            try
+            {
+                GameState.SetGamePhase(GamePhase.Finding);
+                Session = await MultiplayerService.Instance.MatchmakeSessionAsync(matchmakerOptions, sessionOptions,
+                    matchmakerCancellationSource.Token);
+                Debug.Log($"Found Match, Session ID: {Session.Id}");
+                OnSessionChanged();
+                Session.Changed += OnSessionChanged;
+            }
+            catch (SessionException e)
+            {
+                Debug.Log($"Unable to Matchmake: {e}");
+                GameState.SetGamePhase(GamePhase.Error, "Unable to search for players");
+                throw;
+            }
+            catch (Exception e)
+            {
+                Debug.Log($"Unable to Matchmake: {e}");
+                GameState.SetGamePhase(GamePhase.Error, "Unable to search for players");
+                throw;
+            }
+        }
+    }
+
+    private async Task InitializeMatchState(ISession session)
+    {
+        try
+        {
+            Debug.Log("Initialising Match State using Cloud Code");
+            var match = await _chessCloudCodeBindings.InitializeMatch(session.Id);
+            Debug.Log($"Match status is: {match.Status}");
+            if (match.Status == "OK")
+            {
+                GameState.SetGamePhase(GamePhase.InMatch);
+            }
+            else
+            {
+                GameState.SetGamePhase(GamePhase.Error, $"Error Initializing match state, status: {match.Status}");
+            }
+        }
+        catch (CloudCodeRateLimitedException e)
+        {
+            Debug.Log($"Too many requests to during match initialization: {e}");
+            GameState.SetGamePhase(GamePhase.Error, "Unable to initialize match");
+            throw;
+        }
+        catch (CloudCodeException e)
+        {
+            Debug.Log($"Error initializing match via Cloud Code: {e}");
+            GameState.SetGamePhase(GamePhase.Error, "Unable to initialize match");
+            throw;
+        }
+        catch (Exception e)
+        {
+            Debug.Log($"Error initializing match: {e}");
+            GameState.SetGamePhase(GamePhase.Error, "Unable to initialize match");
+            throw;
+        }
     }
 
     private async void OnSessionChanged()
     {
-        if (Session.PlayerCount == Session.MaxPlayers && !_gameStarted)
+        Debug.Log("Session Changed");
+        if (GameState.GamePhase == GamePhase.Finding)
         {
-            if (this.Match == null)
-            {
-                var match = await _chessCloudCodeBindings.InitializeMatch(Session.Id);
-                if (match.Status == "OK")
-                {
-                    SyncMatch();
-                }
-            }
+            await InitializeMatchState(Session);
         }
-        else if (_gameStarted)
+        
+        if (GameState.GamePhase == GamePhase.InMatch)
         {
-            SyncMatch();
+            await UpdateMatchState();
         }
     }
 
-    public async Task SyncMatch()
+    public async Task<string> LoadMatchIdFromPlayer()
     {
-        // Get Match Id from cloud save
         var playerData =
             await CloudSaveService.Instance.Data.Player.LoadAsync(new HashSet<string> { "currentMatchId" });
 
         if (!playerData.ContainsKey("currentMatchId"))
         {
             Debug.Log("no `currentMatchId` stored on Player in Cloud Save");
+            GameState.SetGamePhase(GamePhase.Error, "No Match ID on Player");
             // TODO throw exception?
         }
 
         // Get match from cloud save
-        var matchId = playerData["currentMatchId"];
-        var matchData = await MatchLoader.LoadMatchDataAsync(matchId.Value.GetAs<string>());
-
-        // Update local match state
-        UpdateMatchState(matchData);
+        return playerData["currentMatchId"].Value.GetAsString();
     }
 
-    private async Task UpdateMatchState(Match matchData)
+    private async Task UpdateMatchState()
     {
+        var matchData = await MatchLoader.LoadMatchDataAsync(Session.Id);
+        Debug.Log(matchData);
         var thisPlayerId = AuthenticationService.Instance.PlayerId;
-        if (this.Match == null)
+        if (Match == null)
         {
-            await InitializePlayer();
-            var opponentId = thisPlayerId == matchData.WhitePlayerId
-                ? matchData.BlackPlayerId
-                : matchData.WhitePlayerId;
-            await SetOpponentInfo(opponentId);
+            await InitializeUI(thisPlayerId, matchData);
         }
+        
+        Match = matchData;
+        SyncBoard(Match.Board);
+    }
 
-        this.Match = matchData;
-        this._isWhite = this.Match.WhitePlayerId == thisPlayerId;
-        SyncBoard(this.Match.Board);
+    // TODO rename and refactor Initialize UI
+    // This file has way to many responsibilities and mixes
+    // concerns, this being just one example
+    private async Task InitializeUI(string thisPlayerId, Match matchData)
+    {
+        await InitializePlayer();
+        var opponentId = thisPlayerId == matchData.WhitePlayerId
+            ? matchData.BlackPlayerId
+            : matchData.WhitePlayerId;
+        await SetOpponentInfo(opponentId);
+        
+        _isWhite = matchData.WhitePlayerId == thisPlayerId;
+        uiPanel.SetActive(false);
+        resignButton.SetActive(true);
+        
+        SetPov();
     }
 
     private void ChangeMaterialColor(GameObject obj, Color newColor)

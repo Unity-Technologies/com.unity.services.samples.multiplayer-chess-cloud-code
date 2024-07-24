@@ -12,6 +12,16 @@ namespace Unity.Services.CloudCode.GeneratedBindings
             k_Service = service;
         }
 
+        public async Task<ChessCloudCode.PlayerData> PrepareAndFetchPlayerData()
+        {
+            return await k_Service.CallModuleEndpointAsync<ChessCloudCode.PlayerData>(
+                "ChessCloudCode",
+                "PrepareAndFetchPlayerData",
+                new Dictionary<string, object>()
+                {
+                });
+        }
+
         public async Task<ChessCloudCode.InitializeMatchResponse> InitializeMatch(string sessionId)
         {
             return await k_Service.CallModuleEndpointAsync<ChessCloudCode.InitializeMatchResponse>(

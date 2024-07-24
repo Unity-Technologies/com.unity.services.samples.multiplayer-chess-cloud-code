@@ -6,6 +6,7 @@ using Unity.Services.CloudCode.Core;
 using Unity.Services.CloudSave.Model;
 using Chess;
 using Microsoft.Extensions.Logging;
+using Unity.Services.CloudCode.Shared;
 using Unity.Services.Leaderboards.Model;
 using Unity.Services.Lobby.Model;
 using Unity.Services.Matchmaker.Model;
@@ -38,16 +39,31 @@ public class Chess
         _rng = rng;
     }
 
+    [CloudCodeFunction("PrepareAndFetchPlayerData")]
+    public async Task<PlayerData> PrepareAndFetchPlayerData(IExecutionContext context)
+    {
+        try
+        {
+            var leaderboardEntry = await Leaderboards.GetLeaderboardEntry(context, _gameApiClient, _logger);
+            return new PlayerData { EloScore = (int)leaderboardEntry.Score, Name = leaderboardEntry.PlayerName };
+        }
+        catch (Exception e)
+        {
+            Helpers.LogException(_logger, e, "Unable to prepare and load player data");
+            throw;
+        }
+    }
+
+
     // TODO break out shared logic and evaluate whether to have one method for
     // All match join logic or multiple methods for join via lobby code and matchmaker
     [CloudCodeFunction("InitializeMatch")]
     public async Task<InitializeMatchResponse> InitializeMatch(IExecutionContext context, string sessionId)
     {
-        //var matchmakingResults = await GetMatchmakingResults(context, sessionId);
         var matchmakingResults =
             await _gameApiClient.MatchmakerMatches.GetMatchmakingResultsAsync(context, context.ServiceToken, sessionId,
                 context.ProjectId);
-        if (matchmakingResults == null)
+        if (matchmakingResults.StatusCode == HttpStatusCode.NotFound)
         {
             return new InitializeMatchResponse() { Status = "Matchmaking results not found" };
         }
@@ -59,18 +75,24 @@ public class Chess
         }
 
         var chessBoard = new ChessBoard();
+
+        // Randomize player positions  
+        int seed = sessionId.GetHashCode();
+        var random = new Random(seed);
+        var randomPlayerIds = players.Select(p => p.Id)
+            .OrderBy(x => random.Next())
+            .ToList();
+
         var csResponse = await _gameApiClient.CloudSaveData.SetCustomItemBatchAsync(context, context.ServiceToken,
             context.ProjectId,
             sessionId,
             new SetItemBatchBody(new List<SetItemBody>()
             {
                 new("board", chessBoard.ToFen()),
-                new("whitePlayerId", players[0].Id),
-                new("blackPlayerId", players[1].Id),
+                new("whitePlayerId", randomPlayerIds[0]),
+                new("blackPlayerId", randomPlayerIds[1]),
                 new("turnCounter", 1),
                 new("matchState", MatchState.InProgress.ToString()),
-                new("createdAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds()),
-                new("updatedAt", DateTimeOffset.UtcNow.ToUnixTimeSeconds())
             }));
 
         if (csResponse.StatusCode != HttpStatusCode.OK)
@@ -79,10 +101,10 @@ public class Chess
                 { Status = $"Error creating match state in Cloud Save\nError: {csResponse.ErrorText}" };
         }
 
-        List<string> errors = new List<string>();
-        
-        Parallel.ForEach(players, async player =>
+        var tasks = players.Select(async player =>
         {
+            var color = player.Id == randomPlayerIds[0] ? "White" : "Black";
+            _logger.LogInformation("Setting player state for PlayerId: {PlayerId} as {Color}", player.Id, color);
             var csPlayerResponse = await _gameApiClient.CloudSaveData.SetItemAsync(context, context.ServiceToken,
                 context.ProjectId,
                 player.Id,
@@ -90,9 +112,16 @@ public class Chess
 
             if (csPlayerResponse.StatusCode != HttpStatusCode.OK)
             {
-                errors.Add(csPlayerResponse.ErrorText);
+                return csPlayerResponse.ErrorText;
             }
-        });
+
+            return null;
+        }).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+        var errors = results
+            .Where(r => r != null)
+            .ToList();
 
         if (errors.Count > 0)
         {
@@ -260,8 +289,38 @@ public class Chess
         {
             Board = chessBoard.ToFen(),
             GameOver = chessBoard.IsEndGame,
-            EndgameType = chessBoard.EndGame?.EndgameType.ToString()
+            EndgameType = chessBoard.EndGame?.EndgameType.ToString() ?? string.Empty
         };
+
+        var lobbyData = new Dictionary<string, DataObject>()
+        {
+            {
+                "BoardUpdate",
+                new DataObject(value: boardUpdatedResponse.Board, visibility: DataObject.VisibilityEnum.Member)
+            },
+            {
+                "GameOver",
+                new DataObject(value: boardUpdatedResponse.GameOver.ToString(),
+                    visibility: DataObject.VisibilityEnum.Member)
+            },
+            {
+                "EndGameType",
+                new DataObject(value: boardUpdatedResponse.EndgameType, visibility: DataObject.VisibilityEnum.Member)
+            }
+        };
+
+
+        try
+        {
+            await _gameApiClient.Lobby.UpdateLobbyAsync(context, context.ServiceToken, session, "cloud-code",
+                updateRequest: new UpdateRequest(data: lobbyData));
+        }
+        catch (ApiException e)
+        {
+            _logger.LogError("Exception: {Message}, body: {RawContent}", e.Message, e.Response.RawContent);
+            throw;
+        }
+
         await _pushClient.SendPlayerMessageAsync(context, JsonConvert.SerializeObject(boardUpdatedResponse),
             "boardUpdated",
             opponentId);
@@ -339,29 +398,4 @@ public class Chess
             opponentId);
         return boardUpdatedResponse;
     }
-}
-
-public class HostGameResponse
-{
-    public string LobbyCode { get; set; }
-}
-
-public class JoinGameResponse
-{
-    public string Session { get; set; }
-    public string Board { get; set; }
-    public string OpponentId { get; set; }
-    public bool IsWhite { get; set; }
-}
-
-public class InitializeMatchResponse
-{
-    public string Status;
-}
-
-public class BoardUpdateResponse
-{
-    public string Board { get; set; }
-    public bool GameOver { get; set; }
-    public string EndgameType { get; set; }
 }

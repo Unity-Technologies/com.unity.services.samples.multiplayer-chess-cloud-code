@@ -6,10 +6,12 @@
 /[Tt]emp/
 /[Oo]bj/
 /[Bb]uild/
+/[Bb]uild.app/
 /[Bb]uilds/
 /[Ll]ogs/
 /[Mm]emoryCaptures/
 UserSettings/
+*DoNotShip/
 
 # Asset meta data should only be ignored when the corresponding asset is also ignored
 !/**/*.meta

@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/UI%20Toolkit/chess.uss?fileID=7433441132597879392&amp;guid=f106120d295724f5f913107d3dcb86a8&amp;type=3#chess" />
+    <ui:VisualElement name="RootElement" class="root-panel">
+        <ui:VisualElement name="FindingPlayersPanel" class="base-panel finding-players-panel">
+            <ui:Label name="FindingPlayersLabel" class="message-text" text="Finding Players..."/>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

@@ -7,7 +7,7 @@
     "variants": [],
     "name": "default-pool",
     "enabled": true,
-    "timeoutSeconds": 90,
+    "timeoutSeconds": 10,
     "matchLogic": {
       "matchDefinition": {
         "teams": [
@@ -19,8 +19,8 @@
               "relaxations": []
             },
             "playerCount": {
-              "min": 2,
-              "max": 2,
+              "min": 1,
+              "max": 1,
               "relaxations": []
             },
             "teamRules": []

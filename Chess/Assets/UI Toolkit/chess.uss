@@ -1,0 +1,51 @@
+.root-panel {
+    display: flex;
+    flex-direction: row; 
+    flex-grow: 1;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+}
+
+.base-panel {
+    background-color: rgba(10, 43, 103, 0.9);
+    border-color: white;
+    border-width: 2px;
+    border-radius: 15px;
+}
+
+.error-panel {
+    flex-direction: column;
+    align-items: center;
+    -unity-text-align: middle-center;
+    justify-content: center;
+    font-size: 24px;
+    padding: 16px;
+}
+
+.finding-players-panel {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 0;
+    align-items: center;
+    -unity-text-align: middle-center;
+    justify-content: center;
+    font-size: 24px;
+    padding: 16px;
+}
+
+.error-text {
+    max-width: 400px;
+    flex-wrap: wrap;
+    white-space: normal;
+    color: white;
+}
+
+.message-text {
+    color: white;
+}
+
+.ok-button {
+    width: 100px;
+    border-radius: 15px;
+}  
