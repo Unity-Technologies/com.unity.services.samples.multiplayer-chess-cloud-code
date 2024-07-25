@@ -3,7 +3,8 @@
 
 
 - We need to use the MatchId config type for MM, but creating it is not suppoerted on uDash
-  - uDash does seem to support display for the queuetype, but it says "Relay" which is not necessarily true
+  - uDash does seem to support display for the queuetype, but it says "Relay" which is not necessarily true ---> this needs fixing
+  - THERE IS A FEATURE FLAG ON DASHBOARD
 
 
 - We can create that MM queue type via UGS CLI, though it's not documented
@@ -12,3 +13,21 @@
 
 - The session concept could be implemented in a Session microservice instead of in an SDK, making it available to all (non-MWU, Cloud Code, etc) and allowing us to change behavior without shipping a new SDK
   - The client facing interface on the SDK can stay the same
+
+
+- The features of the multiplay package (sessions) are useful for games that don't need the hosting part. But we still force users to sign up and pay for the MPS bundle to use these. It makes building async multiplayer games with these system potentially a non starter
+
+- When using the Matchmaking API and setting minPlayers == maxPlayers, the call will block until the match is full
+    - Session lifecycle hooks can only be set after it returns with a Session, so there is no good hook for "match started"
+    - If minPlayers < maxPlayers, then it does return immediately, but the Session.OnPlayerJoined hook doesn't run when others matchmake for some reason
+    
+- Update Lobby Data API requires a service-id header when using SA auth, but it's not clearly documented as required. Requests fail if it's not provided. Can't it be inferred from the SA if it's not explicitly sent?
+
+- When MM tries to load a LB score and can't find one, it sets it to 0 automatically and moves on
+    - It seems bad that MM is transparently writing a score, this is not obvious unless you read the docs thoroughly
+    - This constitutes a game mechanic, we shouldn't be opinionated in that space
+    - Asking for a MM ticket effectively has persistent side effects!! 
+    - Players that don't have a score in the leaderboard and request a ticket should get an error
+    - We've observed strange consistency behavior where MM set scores to 0 on players that already had a score set. This can produce data loss!
+        - Maybe when it fails to get a response from Leaderboards, it just goes ahead and writes a zero??
+
