@@ -31,3 +31,4 @@
     - We've observed strange consistency behavior where MM set scores to 0 on players that already had a score set. This can produce data loss!
         - Maybe when it fails to get a response from Leaderboards, it just goes ahead and writes a zero??
 
+- First time we set up Multiplayer Playmode, the second player didn't quite start correctly (no leaderboards data was loaded, game crashed with uninitialized _gameState)
