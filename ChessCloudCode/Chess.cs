@@ -40,11 +40,11 @@ public class Chess
     }
 
     [CloudCodeFunction("PrepareAndFetchPlayerData")]
-    public async Task<PlayerData> PrepareAndFetchPlayerData(IExecutionContext context)
+    public async Task<PlayerData> PrepareAndFetchPlayerData(IExecutionContext context, string playerId)
     {
         try
         {
-            var leaderboardEntry = await Leaderboards.GetLeaderboardEntry(context, _gameApiClient, _logger);
+            var leaderboardEntry = await Leaderboards.GetOrInitLeaderboardEntry(context, _gameApiClient.Leaderboards, _logger, playerId);
             return new PlayerData { EloScore = (int)leaderboardEntry.Score, Name = leaderboardEntry.PlayerName };
         }
         catch (Exception e)
@@ -53,7 +53,6 @@ public class Chess
             throw;
         }
     }
-
 
     // TODO break out shared logic and evaluate whether to have one method for
     // All match join logic or multiple methods for join via lobby code and matchmaker
