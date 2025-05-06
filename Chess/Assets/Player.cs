@@ -12,14 +12,9 @@ using Unity.Services.Core;
 using Unity.Services.Leaderboards;
 using Unity.Services.Leaderboards.Exceptions;
 using Unity.Services.Lobbies;
-using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
-using UnityEngine.Analytics;
 using UnityEngine.InputSystem;
-using UnityEngine.Serialization;
-using UnityEngine.SocialPlatforms.Impl;
-using WebSocketSharp;
 
 public class Player : MonoBehaviour
 {
