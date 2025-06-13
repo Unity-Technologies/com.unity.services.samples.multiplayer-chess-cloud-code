@@ -22,14 +22,6 @@ public class SignInScenePlayer : MonoBehaviour
         {
             await UnityServices.InitializeAsync();
             await SignInCachedUserAsync();
-            var isAlreadySignedIn = AuthenticationService.Instance.IsSignedIn;
-            
-            if(isAlreadySignedIn)
-            {
-                Debug.Log("Already signed in, loading ChessDemo scene.");
-                LoadSceneByName(ChessDemoScene);
-                return;
-            }
             
             SetupEvents();
         }
@@ -56,12 +48,11 @@ public class SignInScenePlayer : MonoBehaviour
         }
     }
 
-    public async void SignOut()
+    public void SignOut()
     {
         try
         {
-            AuthenticationService.Instance.SignOut();
-            Debug.Log("Player signed out successfully.");
+            AuthenticationService.Instance.SignOut(true);
             LoadSceneByName(SignInScene);
         }
         catch (Exception e)
@@ -75,7 +66,6 @@ public class SignInScenePlayer : MonoBehaviour
     {
         try
         {
-            Debug.Log("Attempting to sign up with username and password...");
             var username = usernameInput.text;
             var password = passwordInput.text;
             var playerNameInputText = playerNameInput.text;

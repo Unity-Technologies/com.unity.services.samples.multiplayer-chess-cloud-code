@@ -255,6 +255,7 @@ public class Player : MonoBehaviour
     private Task SubscribeToPlayerMessages()
     {
         var callbacks = new SubscriptionEventCallbacks();
+        
         callbacks.MessageReceived += @event =>
         {
             switch (@event.MessageType)
