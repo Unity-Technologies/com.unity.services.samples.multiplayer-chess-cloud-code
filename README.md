@@ -11,6 +11,7 @@ For this sample to work, you first need to publish your Cloud Code Module and Le
 To access the Deployment window:
 - In 2021 or before, use `Window > Deployment`.
 - In 2022 and later, use `Services > Deployment`.
+- 
 
 Then click on `Deploy All` to deploy both `ChessCloudCode.ccmr` and `EloRatings.lb`. See [Deployment Window](https://docs.unity.cn/Packages/com.unity.services.deployment@1.0/manual/deployment_window.html) for more information.
 

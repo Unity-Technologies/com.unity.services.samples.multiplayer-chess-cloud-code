@@ -7,19 +7,16 @@ using Newtonsoft.Json;
 using TMPro;
 using Unity.Services.Authentication;
 using Unity.Services.CloudCode;
+using Unity.Services.CloudCode.GeneratedBindings;
+using Unity.Services.CloudCode.GeneratedBindings.ChessCloudCode;
 using Unity.Services.CloudCode.Subscriptions;
 using Unity.Services.Core;
 using Unity.Services.Leaderboards;
 using Unity.Services.Leaderboards.Exceptions;
 using Unity.Services.Lobbies;
-using Unity.Services.Lobbies.Models;
 using Unity.VisualScripting;
 using UnityEngine;
-using UnityEngine.Analytics;
 using UnityEngine.InputSystem;
-using UnityEngine.Serialization;
-using UnityEngine.SocialPlatforms.Impl;
-using WebSocketSharp;
 
 public class Player : MonoBehaviour
 {
@@ -28,6 +25,7 @@ public class Player : MonoBehaviour
     public GameObject cameraPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
+    public TextMeshProUGUI waitingForOpponentText;
     
     public TextMeshProUGUI playerNameText;
     public TextMeshProUGUI playerEloText;
@@ -35,6 +33,7 @@ public class Player : MonoBehaviour
     public TextMeshProUGUI opponentEloText;
 
     public GameObject resignButton;
+    public GameObject leaveLobbyButton;
     public GameObject uiPanel;
     public TextMeshProUGUI resultText;
     public GameObject board;
@@ -44,19 +43,31 @@ public class Player : MonoBehaviour
     private bool _gameStarted;
     private bool _isWhite;
     private string _currentSession;
+    private string _opponentId;
 
     private readonly Color32 _selectedColor = new (84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
     private readonly Color32 _darkColor = new (84, 84, 84, 255);
+
+    private ChessCloudCodeBindings _chessModule;
     
     private async void Start()
     {
-        await UnityServices.InitializeAsync();
-        await AuthenticationService.Instance.SignInAnonymouslyAsync();
-        await SubscribeToPlayerMessages();
-        SyncBoard(StartingBoard);
-        InitializePlayer();
-        resignButton.SetActive(false);
+        try
+        {
+            await UnityServices.InitializeAsync();
+
+            await SubscribeToPlayerMessages();
+            SyncBoard(StartingBoard);
+            await InitializePlayer();
+            resignButton.SetActive(false);
+            leaveLobbyButton.SetActive(false);
+            _chessModule = new ChessCloudCodeBindings(CloudCodeService.Instance);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError(e);
+        }
     }
     
     private async Task InitializePlayer()
@@ -70,8 +81,9 @@ public class Player : MonoBehaviour
             // If player is not present on lb create a new entry for them
             if (e.Reason == LeaderboardsExceptionReason.EntryNotFound)
             {
-                var response = await LeaderboardsService.Instance.AddPlayerScoreAsync("EloRatings", 1500);
+                var response = await _chessModule.AddPlayerScore(1500);
                 playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
+                Debug.Log($"Player response: {response}");
                 playerNameText.text = response.PlayerName;
             }
             else
@@ -91,19 +103,39 @@ public class Player : MonoBehaviour
 
     private async Task SetOpponentInfo(string opponentId)
     {
-        Debug.Log($"Setting opponent info");
+        _opponentId = opponentId;
         var response = await LeaderboardsService.Instance.GetScoresByPlayerIdsAsync("EloRatings", new List<string>(){opponentId});
         var opponent = response?.Results?.FirstOrDefault();
-        Debug.Log($"Setting opponent info {opponent?.PlayerId}");
+        
         opponentEloText.text = "Rating: " + Math.Round(opponent?.Score ?? 1500);
         opponentNameText.text = opponent?.PlayerName ?? "Unknown";
     }
 
     public async void CreateGame()
     {
-        var hostGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>("ChessCloudCode", "HostGame");
+        try
+        {
+            waitingForOpponentText.text = "Creating game...";
+            var hostGameResponse = await _chessModule.HostGame();
         
-        lobbyCodeText.text = hostGameResponse.LobbyCode;
+            lobbyCodeText.text = hostGameResponse.LobbyCode;
+            waitingForOpponentText.text = "Waiting for opponent to join...";
+            leaveLobbyButton.SetActive(true);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError(e);
+        }
+    }
+
+    public async void LeaveLobby()
+    {
+        waitingForOpponentText.text = "";
+        var playerId = AuthenticationService.Instance.PlayerId;
+        var lobbyId = lobbyCodeText.text;
+        await _chessModule.LeaveLobby(playerId,lobbyId);
+        leaveLobbyButton.SetActive(false);
+        lobbyCodeText.text = "";
     }
 
     private void SetPov()
@@ -116,8 +148,7 @@ public class Player : MonoBehaviour
     {
         try
         {
-            var boardUpdate = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>("ChessCloudCode", "Resign",
-                new Dictionary<string, object> { { "session", _currentSession } });
+            var boardUpdate = await _chessModule.Resign(_currentSession);
             OnBoardUpdate(boardUpdate);
         }
         catch (LobbyServiceException exception)
@@ -133,8 +164,7 @@ public class Player : MonoBehaviour
             // There's a weird no space character that gets added to the end of the lobby code, let's remove it for now
             var sanitizedLobbyCode = Regex.Replace(lobbyInputCodeText.text, @"\s", "").Replace("\u200B", "");
             
-            var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
-                new Dictionary<string, object> { { "lobbyCode", sanitizedLobbyCode } });
+            var joinGameResponse = await _chessModule.JoinGame(sanitizedLobbyCode);
             lobbyCodeText.text = sanitizedLobbyCode;
             
             OnGameStart(joinGameResponse);
@@ -186,15 +216,9 @@ public class Player : MonoBehaviour
     private async void MakeMove(GameObject piece, Vector3 toPos)
     {
         if (piece == null) return;
-        var result = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>(
-            "ChessCloudCode", 
-            "MakeMove",
-            new Dictionary<string, object>
-            {
-                { "session", _currentSession }, 
-                { "fromPosition", PosToFen(piece.transform.position) },
-                { "toPosition", PosToFen(toPos) }
-            });
+        var result = await _chessModule.MakeMove(_currentSession
+            , PosToFen(piece.transform.position)
+            , PosToFen(toPos));
 
         SelectPiece(null);
         OnBoardUpdate(result);
@@ -209,12 +233,15 @@ public class Player : MonoBehaviour
             resignButton.SetActive(false);
             resultText.text = boardUpdateResponse.EndgameType;
             RefreshPlayerInfo();
+            SetOpponentInfo(_opponentId);
+            LeaveLobby();
         }
     }
 
     private async void OnGameStart(JoinGameResponse joinGameResponse)
     {
         Debug.Log($"Opponent joined: {joinGameResponse.OpponentId}");
+        waitingForOpponentText.text = "";
         _currentSession = joinGameResponse.Session;
         SetOpponentInfo(joinGameResponse.OpponentId);
         SyncBoard(joinGameResponse.Board);
@@ -344,21 +371,6 @@ public class Player : MonoBehaviour
         public string LobbyCode { get; set; }
     }    
     
-    public class BoardUpdateResponse
-    {
-        public string Board { get; set; }
-        public bool GameOver { get; set; }
-        public string EndgameType { get; set; }
-    }
-
-    public class JoinGameResponse
-    {        
-        public string Session { get; set; }
-        public string Board { get; set; }
-        public string OpponentId { get; set; }
-        public bool IsWhite { get; set; }
-    }
-
     private string PosToFen(Vector3 pos)
     {
         return (char)(pos.x + 97) + ((char)pos.z + 1).ToString();

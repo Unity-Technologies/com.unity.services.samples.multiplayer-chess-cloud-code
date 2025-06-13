@@ -4,6 +4,7 @@ using Unity.Services.CloudCode.Core;
 using Unity.Services.CloudSave.Model;
 using Chess;
 using Microsoft.Extensions.Logging;
+using Unity.Services.CloudCode.Shared;
 using Unity.Services.Leaderboards.Model;
 using Unity.Services.Lobby.Model;
 
@@ -109,7 +110,7 @@ public class Chess
                 lobby.Id, new List<string> { "board", "whitePlayerId", "blackPlayerId" });
 
         var chessBoard = ChessBoard.LoadFromFen(saveResponse.Data.Results.Find(r => r.Key == "board").Value.ToString());
-        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);;
+        var opponentId = lobby.Players.Select(p => p.Id).First(id => id != context.PlayerId);
         var whitePlayer = saveResponse.Data.Results.Find(r => r.Key == "whitePlayerId").Value.ToString();
         
         var playerIsWhite = whitePlayer == context.PlayerId;
@@ -187,7 +188,7 @@ public class Chess
         return boardUpdatedResponse;
     }
 
-    public async Task UpdateElos(IExecutionContext context, string opponentId, double playerScore)
+    private async Task UpdateElos(IExecutionContext context, string opponentId, double playerScore)
     {
         var projectId = Guid.Parse(context.ProjectId);
         var elos = await _gameApiClient.Leaderboards.GetLeaderboardScoresByPlayerIdsAsync(context, context.ServiceToken,
@@ -255,6 +256,45 @@ public class Chess
             opponentId);
         return boardUpdatedResponse;
     }
+    
+    [CloudCodeFunction("LeaveLobby")]
+    public async Task LeaveLobby(IExecutionContext context, string lobbyId, string playerId)
+    {
+        try
+        {
+            await _gameApiClient.Lobby.RemovePlayerAsync(context, context.ServiceToken, lobbyId,playerId);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError($"Failed to leave lobby: {e.Message} | {e.GetType().Name}");
+        }
+    }
+
+    [CloudCodeFunction("AddPlayerScore")]
+    public async Task<LeaderboardEntryWithUpdatedTime> AddPlayerScore(IExecutionContext context, double score)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(context.ProjectId) || string.IsNullOrEmpty(context.PlayerId))
+            {
+                throw new Exception("Project ID or Player ID is not set in the context.");
+            }
+            var projectId = context.ProjectId;
+            var projectIdGuid = Guid.Parse(projectId);
+            var response = await _gameApiClient.Leaderboards.AddLeaderboardPlayerScoreAsync(context,
+                context.ServiceToken,
+                projectIdGuid,
+                LeaderboardId, context.PlayerId, new LeaderboardScore(score));
+            
+            return response.Data;
+        }
+        catch (Exception e)
+        {
+            _logger.LogError($"Failed to add player score: {e.Message} | {e.GetType().Name}");
+            throw;
+        }
+    }
+
 }
 
 public class HostGameResponse
