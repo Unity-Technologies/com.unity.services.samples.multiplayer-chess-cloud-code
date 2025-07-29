@@ -1,2 +1,4 @@
 /Chess/Assets/NintendoSDKPlugin
 /Chess/Packages/com.unity.inputsystem.switch2
+Chess/Assets/nn.cpp
+Chess/Assets/nn.cpp.meta

@@ -28,7 +28,7 @@ public class Player : MonoBehaviour
     public GameObject cameraPivot;
     public TextMeshProUGUI lobbyInputCodeText;
     public TextMeshProUGUI lobbyCodeText;
-    
+
     public TextMeshProUGUI playerNameText;
     public TextMeshProUGUI playerEloText;
     public TextMeshProUGUI opponentNameText;
@@ -38,17 +38,17 @@ public class Player : MonoBehaviour
     public GameObject uiPanel;
     public TextMeshProUGUI resultText;
     public GameObject board;
-    
+
     private readonly Dictionary<string, UnityEngine.Object> _prefabs = new();
     private const string StartingBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     private bool _gameStarted;
     private bool _isWhite;
     private string _currentSession;
 
-    private readonly Color32 _selectedColor = new (84, 84, 255, 255);
+    private readonly Color32 _selectedColor = new(84, 84, 255, 255);
     private readonly Color32 _lightColor = new(223, 210, 194, 255);
-    private readonly Color32 _darkColor = new (84, 84, 84, 255);
-    
+    private readonly Color32 _darkColor = new(84, 84, 84, 255);
+
     private async void Start()
     {
         await UnityServices.InitializeAsync();
@@ -58,7 +58,7 @@ public class Player : MonoBehaviour
         InitializePlayer();
         resignButton.SetActive(false);
     }
-    
+
     private async Task InitializePlayer()
     {
         try
@@ -84,7 +84,7 @@ public class Player : MonoBehaviour
     private async Task RefreshPlayerInfo()
     {
         var response = await LeaderboardsService.Instance.GetPlayerScoreAsync("EloRatings");
-        
+
         playerEloText.text = "Rating: " + Math.Round(response?.Score ?? 1500);
         playerNameText.text = response.PlayerName;
     }
@@ -92,7 +92,7 @@ public class Player : MonoBehaviour
     private async Task SetOpponentInfo(string opponentId)
     {
         Debug.Log($"Setting opponent info");
-        var response = await LeaderboardsService.Instance.GetScoresByPlayerIdsAsync("EloRatings", new List<string>(){opponentId});
+        var response = await LeaderboardsService.Instance.GetScoresByPlayerIdsAsync("EloRatings", new List<string>() { opponentId });
         var opponent = response?.Results?.FirstOrDefault();
         Debug.Log($"Setting opponent info {opponent?.PlayerId}");
         opponentEloText.text = "Rating: " + Math.Round(opponent?.Score ?? 1500);
@@ -102,7 +102,7 @@ public class Player : MonoBehaviour
     public async void CreateGame()
     {
         var hostGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<HostGameResponse>("ChessCloudCode", "HostGame");
-        
+
         lobbyCodeText.text = hostGameResponse.LobbyCode;
     }
 
@@ -125,18 +125,18 @@ public class Player : MonoBehaviour
             Debug.LogException(exception);
         }
     }
-    
+
     public async void JoinLobbyByCode()
     {
         try
         {
             // There's a weird no space character that gets added to the end of the lobby code, let's remove it for now
             var sanitizedLobbyCode = Regex.Replace(lobbyInputCodeText.text, @"\s", "").Replace("\u200B", "");
-            
+
             var joinGameResponse = await CloudCodeService.Instance.CallModuleEndpointAsync<JoinGameResponse>("ChessCloudCode", "JoinGame",
                 new Dictionary<string, object> { { "lobbyCode", sanitizedLobbyCode } });
             lobbyCodeText.text = sanitizedLobbyCode;
-            
+
             OnGameStart(joinGameResponse);
         }
         catch (LobbyServiceException exception)
@@ -154,6 +154,7 @@ public class Player : MonoBehaviour
             {
                 Destroy(child.gameObject);
             }
+
             foreach (var piece in boardState)
             {
                 var pieceType = char.ToLower(piece.Value) switch
@@ -169,12 +170,12 @@ public class Player : MonoBehaviour
                 var prefabName = pieceType + (char.IsUpper(piece.Value) ? "Light" : "Dark");
                 if (!_prefabs.ContainsKey(prefabName))
                 {
-                    _prefabs[prefabName] = Resources.Load($"{pieceType}/Prefabs/{prefabName}");    
+                    _prefabs[prefabName] = Resources.Load($"{pieceType}/Prefabs/{prefabName}");
                 }
-                
+
                 var newObject = Instantiate(_prefabs[prefabName], board.transform);
                 newObject.GameObject().transform.position = new Vector3(piece.Key.Item1, 0, piece.Key.Item2);
-                newObject.GameObject().transform.rotation = Quaternion.Euler(0, char.IsLower(piece.Value)? 180 : 0, 0);
+                newObject.GameObject().transform.rotation = Quaternion.Euler(0, char.IsLower(piece.Value) ? 180 : 0, 0);
             }
         }
         catch (CloudCodeException exception)
@@ -185,13 +186,14 @@ public class Player : MonoBehaviour
 
     private async void MakeMove(GameObject piece, Vector3 toPos)
     {
-        if (piece == null) return;
+        if (piece == null)
+            return;
         var result = await CloudCodeService.Instance.CallModuleEndpointAsync<BoardUpdateResponse>(
-            "ChessCloudCode", 
+            "ChessCloudCode",
             "MakeMove",
             new Dictionary<string, object>
             {
-                { "session", _currentSession }, 
+                { "session", _currentSession },
                 { "fromPosition", PosToFen(piece.transform.position) },
                 { "toPosition", PosToFen(toPos) }
             });
@@ -247,9 +249,8 @@ public class Player : MonoBehaviour
         };
         callbacks.ConnectionStateChanged += @event =>
         {
-            if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted)
-            {
-            }
+            if (@event == EventConnectionState.Subscribed && _currentSession != null && _gameStarted) { }
+
             Debug.Log($"Got player subscription ConnectionStateChanged: {@event.ToString()}");
         };
         callbacks.Kicked += () =>
@@ -265,9 +266,15 @@ public class Player : MonoBehaviour
 
     public void PlayerInteract(InputAction.CallbackContext context)
     {
-        if (!context.performed && _currentSession != null) return;
-        var mousePosition = Mouse.current.position.ReadValue();
-        var rayOrigin = playerCamera.ScreenPointToRay(mousePosition);
+        if (!context.performed && _currentSession != null)
+            return;
+        
+        Debug.Log($"Action: {context.action.name} value: {context.ReadValueAsObject()}");
+
+        if (context.valueType != typeof(Vector2)) { return; }
+
+        var position = context.ReadValue<Vector2>();
+        var rayOrigin = playerCamera.ScreenPointToRay(position);
         if (Physics.Raycast(rayOrigin, out var hitInfo))
         {
             var gameObject = hitInfo.transform.gameObject;
@@ -280,12 +287,12 @@ public class Player : MonoBehaviour
             else if (gameObject.name.Contains("Light") == _isWhite)
             {
                 SelectPiece(hitInfo.transform.gameObject);
-                Debug.Log($"Piece selected: {_selectedPiece.name}");    
+                Debug.Log($"Piece selected: {_selectedPiece.name}");
             }
         }
         else
         {
-            SelectPiece(null);   
+            SelectPiece(null);
         }
     }
 
@@ -296,8 +303,10 @@ public class Player : MonoBehaviour
             ChangeMaterialColor(_selectedPiece,
                 _selectedPiece.name.Contains("Light") ? _lightColor : _darkColor);
         }
+
         _selectedPiece = piece;
-        if (_selectedPiece == null) return;
+        if (_selectedPiece == null)
+            return;
         ChangeMaterialColor(_selectedPiece, _selectedColor);
     }
 
@@ -326,6 +335,7 @@ public class Player : MonoBehaviour
                     x += 1;
                 }
             }
+
             x = 0;
             y -= 1;
         }
@@ -338,12 +348,12 @@ public class Player : MonoBehaviour
         var selectedRenderer = obj.GetComponent<Renderer>();
         selectedRenderer.material.color = newColor;
     }
-    
+
     public class HostGameResponse
     {
         public string LobbyCode { get; set; }
-    }    
-    
+    }
+
     public class BoardUpdateResponse
     {
         public string Board { get; set; }
@@ -352,7 +362,7 @@ public class Player : MonoBehaviour
     }
 
     public class JoinGameResponse
-    {        
+    {
         public string Session { get; set; }
         public string Board { get; set; }
         public string OpponentId { get; set; }
